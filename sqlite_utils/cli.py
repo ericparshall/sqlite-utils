@@ -34,6 +34,7 @@ from .utils import (
     OperationalError,
     _compile_code,
     chunks,
+    dedupe_keys,
     file_progress,
     find_spatialite,
     flatten as _flatten,
@@ -3496,6 +3497,8 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
     # We have to iterate two-at-a-time so we can know if we
     # should output a trailing comma or if we have reached
     # the last row.
+    # Duplicate column names would overwrite each other in JSON objects
+    json_headers = dedupe_keys(headers)
     current_iter, next_iter = itertools.tee(iterator, 2)
     next(next_iter, None)
     first = True
@@ -3506,7 +3509,7 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
             # Any value that is a valid JSON string should be treated as JSON
             data = [maybe_json(value) for value in data]
         if not arrays:
-            data = dict(zip(headers, data))
+            data = dict(zip(json_headers, data))
         line = "{firstchar}{serialized}{maybecomma}{lastchar}".format(
             firstchar=("[" if first else " ") if not nl else "",
             serialized=json.dumps(data, default=json_binary),

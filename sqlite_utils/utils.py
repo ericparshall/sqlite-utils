@@ -613,6 +613,47 @@ def hash_record(record: Dict[str, Any], keys: Optional[Iterable[str]] = None) ->
     ).hexdigest()
 
 
+def dedupe_keys(keys: Iterable[str]) -> List[str]:
+    """
+    Return a list of names with duplicates renamed so every name is unique.
+
+    The first occurrence of a name keeps it. Later duplicates get a numeric
+    suffix - ``_2``, ``_3`` and so on - skipping any suffixed name that
+    would collide with another name in the list::
+
+        dedupe_keys(["id", "id", "id"])
+        # ["id", "id_2", "id_3"]
+        dedupe_keys(["id", "id", "id_2"])
+        # ["id", "id_3", "id_2"]
+
+    Used to build row dictionaries from query results that contain the same
+    column name more than once, such as joins.
+
+    :param keys: Iterable of names, for example column names from ``cursor.description``
+    """
+    keys = list(keys)
+    original = set(keys)
+    if len(original) == len(keys):
+        return keys
+    used: Set[str] = set()
+    next_suffix: Dict[str, int] = {}
+    result = []
+    for key in keys:
+        if key not in used:
+            new_key = key
+        else:
+            suffix = next_suffix.get(key, 2)
+            while True:
+                new_key = "{}_{}".format(key, suffix)
+                suffix += 1
+                if new_key not in original and new_key not in used:
+                    break
+            next_suffix[key] = suffix
+        used.add(new_key)
+        result.append(new_key)
+    return result
+
+
 def _flatten(d: Dict[str, Any]) -> Generator[Tuple[str, Any], None, None]:
     for key, value in d.items():
         if isinstance(value, dict):
