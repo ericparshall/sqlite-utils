@@ -175,6 +175,37 @@ def test_tables_schema(db_path):
                 "=====  =====  =========="
             ),
         ),
+        (
+            ["--fmt", "plain", "--no-headers"],
+            (
+                "verb0  noun0  adjective0\n"
+                "verb1  noun1  adjective1\n"
+                "verb2  noun2  adjective2\n"
+                "verb3  noun3  adjective3"
+            ),
+        ),
+        (
+            ["-t", "--no-headers"],
+            (
+                "-----  -----  ----------\n"
+                "verb0  noun0  adjective0\n"
+                "verb1  noun1  adjective1\n"
+                "verb2  noun2  adjective2\n"
+                "verb3  noun3  adjective3\n"
+                "-----  -----  ----------"
+            ),
+        ),
+        (
+            ["--fmt", "rst", "--no-headers"],
+            (
+                "=====  =====  ==========\n"
+                "verb0  noun0  adjective0\n"
+                "verb1  noun1  adjective1\n"
+                "verb2  noun2  adjective2\n"
+                "verb3  noun3  adjective3\n"
+                "=====  =====  =========="
+            ),
+        ),
     ],
 )
 def test_output_table(db_path, options, expected):
@@ -693,6 +724,51 @@ def test_query_csv(db_path, format, expected):
     )
     expected_rest = "\n".join(expected.split("\n")[1:]).strip()
     assert result.output.strip().replace("\r", "") == expected_rest
+
+
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        (["--fmt", "plain"], "name\nCleo\nPancakes"),
+        (["--fmt", "plain", "--no-headers"], "Cleo\nPancakes"),
+        (["-t", "--no-headers"], "--------\nCleo\nPancakes\n--------"),
+        (
+            ["--fmt", "github", "--no-headers"],
+            "|----------|\n| Cleo     |\n| Pancakes |",
+        ),
+    ],
+)
+def test_query_table_no_headers(db_path, options, expected):
+    db = Database(db_path)
+    with db.conn:
+        db["dogs"].insert_all(
+            [
+                {"id": 1, "age": 4, "name": "Cleo"},
+                {"id": 2, "age": 2, "name": "Pancakes"},
+            ]
+        )
+    result = CliRunner().invoke(cli.cli, [db_path, "select name from dogs"] + options)
+    assert result.exit_code == 0
+    assert result.output.strip() == expected
+    if "--no-headers" in options:
+        assert "name" not in result.output
+
+
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        (["--fmt", "plain"], "table\nGosh\nGosh2"),
+        (["--fmt", "plain", "--no-headers"], "Gosh\nGosh2"),
+        (["-t", "--no-headers", "--counts"], "-----  -\nGosh   0\nGosh2  0\n-----  -"),
+    ],
+)
+def test_tables_table_no_headers(db_path, options, expected):
+    result = CliRunner().invoke(cli.cli, ["tables", db_path] + options)
+    assert result.exit_code == 0
+    assert result.output.strip() == expected
+    if "--no-headers" in options:
+        assert "table" not in result.output
+        assert "count" not in result.output
 
 
 _all_query = "select id, name, age from dogs"
