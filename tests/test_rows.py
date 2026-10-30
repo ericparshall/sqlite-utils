@@ -31,6 +31,14 @@ def test_rows_where(where, where_args, expected_ids, fresh_db):
     }
 
 
+def test_rows_where_deduplicates_column_names(fresh_db):
+    table = fresh_db["dogs"]
+    table.insert({"id": 1, "name": "Cleo"})
+    assert list(table.rows_where(select="id, id, name")) == [
+        {"id": 1, "id_2": 1, "name": "Cleo"}
+    ]
+
+
 @pytest.mark.parametrize(
     "where,order_by,expected_ids",
     [

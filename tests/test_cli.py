@@ -695,6 +695,37 @@ def test_query_csv(db_path, format, expected):
     assert result.output.strip().replace("\r", "") == expected_rest
 
 
+def test_query_json_deduplicates_column_names(db_path):
+    sql = "select 1 as id, 2 as id, 'x' as value, 'y' as value"
+    result = CliRunner().invoke(cli.cli, [db_path, sql])
+    assert result.exit_code == 0
+    assert (
+        result.output.strip() == '[{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}]'
+    )
+    result = CliRunner().invoke(cli.cli, [db_path, sql, "--nl"])
+    assert result.exit_code == 0
+    assert result.output.strip() == '{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}'
+
+
+@pytest.mark.parametrize(
+    "format,expected",
+    [
+        ("--csv", "id,id\n1,2\n"),
+        ("--tsv", "id\tid\n1\t2\n"),
+    ],
+)
+def test_query_csv_keeps_duplicate_headers(db_path, format, expected):
+    result = CliRunner().invoke(cli.cli, [db_path, "select 1 as id, 2 as id", format])
+    assert result.exit_code == 0
+    assert result.output.replace("\r", "") == expected
+
+
+def test_query_table_keeps_duplicate_headers(db_path):
+    result = CliRunner().invoke(cli.cli, [db_path, "select 1 as id, 2 as id", "-t"])
+    assert result.exit_code == 0
+    assert result.output.splitlines()[0].split() == ["id", "id"]
+
+
 _all_query = "select id, name, age from dogs"
 _one_query = "select id, name, age from dogs where id = 1"
 

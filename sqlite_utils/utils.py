@@ -570,6 +570,43 @@ def _compile_code(
     return cast(Callable[..., object], globals_dict["fn"])
 
 
+def dedupe_keys(keys: Iterable[str]) -> List[str]:
+    """
+    Return a list of keys with any duplicates suffixed to make them unique.
+
+    The first occurrence of a name is left unchanged. Later duplicates are
+    given a numeric suffix of ``_2``, ``_3`` and so on. A suffix that would
+    collide with another name in the original list, or with one already
+    generated, is skipped.
+
+    Example usage::
+
+        from sqlite_utils.utils import dedupe_keys
+
+        dedupe_keys(["id", "id", "id"])  # ["id", "id_2", "id_3"]
+        dedupe_keys(["id", "id", "id_2"])  # ["id", "id_3", "id_2"]
+
+    :param keys: Any iterable of column names
+    """
+    keys = list(keys)
+    reserved = set(keys)
+    used: Set[str] = set()
+    deduped = []
+    for key in keys:
+        if key not in used:
+            used.add(key)
+            deduped.append(key)
+            continue
+        suffix = 2
+        candidate = "{}_{}".format(key, suffix)
+        while candidate in used or candidate in reserved:
+            suffix += 1
+            candidate = "{}_{}".format(key, suffix)
+        used.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
 def chunks(sequence: Iterable[T], size: int) -> Iterable[Iterable[T]]:
     """
     Iterate over chunks of the sequence of the given size.
