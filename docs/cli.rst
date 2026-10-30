@@ -251,6 +251,17 @@ You can use the ``--fmt`` option to specify different table formats, for example
        2      2  Pancakes
     ====  =====  ========
 
+Use ``--no-headers`` to omit the header row from table output, leaving only the data rows:
+
+.. code-block:: bash
+
+    sqlite-utils dogs.db "select name from dogs" --fmt plain --no-headers
+
+.. code-block:: output
+
+    Cleo
+    Pancakes
+
 Available ``--fmt`` options are:
 
 .. [[[cog
@@ -770,7 +781,7 @@ Use ``--schema`` to include the schema of each table:
                "age" INTEGER,
                "name" TEXT)
 
-The ``--nl``, ``--csv``, ``--tsv``, ``--table`` and ``--fmt`` options are also available.
+The ``--nl``, ``--csv``, ``--tsv``, ``--no-headers``, ``--table`` and ``--fmt`` options are also available.
 
 .. note::
     In Python: :ref:`db.tables or db.table_names() <python_api_tables>`  CLI reference: :ref:`sqlite-utils tables <cli_ref_tables>`
