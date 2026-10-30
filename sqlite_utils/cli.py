@@ -39,6 +39,7 @@ from .utils import (
     flatten as _flatten,
     sqlite3,
     decode_base64_values,
+    dedupe_keys,
     progressbar,
     rows_from_file,
     Format,
@@ -3496,6 +3497,9 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
     # We have to iterate two-at-a-time so we can know if we
     # should output a trailing comma or if we have reached
     # the last row.
+    if not arrays:
+        # Rename duplicate column names so no value is lost in the JSON objects
+        headers = dedupe_keys(headers)
     current_iter, next_iter = itertools.tee(iterator, 2)
     next(next_iter, None)
     first = True

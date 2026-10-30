@@ -746,6 +746,32 @@ def test_query_json_empty(db_path):
     assert result.output.strip() == "[]"
 
 
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        ([], '[{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}]'),
+        (["--nl"], '{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}'),
+        (["--arrays"], '[[1, 2, "x", "y"]]'),
+        (["--csv"], "id,id,value,value\n1,2,x,y"),
+        (["--tsv"], "id\tid\tvalue\tvalue\n1\t2\tx\ty"),
+        (
+            ["-t"],
+            "  id    id  value    value\n"
+            "----  ----  -------  -------\n"
+            "   1     2  x        y",
+        ),
+    ],
+)
+def test_query_duplicate_column_names(db_path, args, expected):
+    Database(db_path).vacuum()
+    result = CliRunner().invoke(
+        cli.cli,
+        [db_path, "select 1 as id, 2 as id, 'x' as value, 'y' as value"] + args,
+    )
+    assert result.exit_code == 0
+    assert result.output.rstrip().replace("\r\n", "\n") == expected
+
+
 def test_query_invalid_function(db_path):
     result = CliRunner().invoke(
         cli.cli, [db_path, "select bad()", "--functions", "def invalid_python"]
