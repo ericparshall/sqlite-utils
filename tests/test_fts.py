@@ -95,6 +95,18 @@ def test_search_limit_offset(fresh_db):
     )
 
 
+def test_search_duplicate_column_names(fresh_db):
+    table = fresh_db["t"]
+    table.insert_all(search_records)
+    table.enable_fts(["text", "country"], fts_version="FTS4")
+    assert list(table.search("tanuki", columns=["text", "text"])) == [
+        {
+            "text": "tanuki are running tricksters",
+            "text_2": "tanuki are running tricksters",
+        }
+    ]
+
+
 @pytest.mark.parametrize("fts_version", ("FTS4", "FTS5"))
 def test_search_where(fresh_db, fts_version):
     table = fresh_db["t"]

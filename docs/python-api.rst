@@ -233,6 +233,23 @@ The SQL query is executed as soon as ``db.query()`` is called. The resulting row
 
 ``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, for example - will raise a ``ValueError``. The rejected statement is rolled back, so it has no effect on the database. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
 
+.. _python_api_query_duplicate_columns:
+
+Since each row is a dictionary, a query that returns the same column name more than once - common with joins - would otherwise lose values. To avoid this, the first column with a name keeps it and later duplicates are given a numeric suffix: ``_2``, ``_3`` and so on. A suffixed name that would collide with another column in the same result is skipped:
+
+.. code-block:: python
+
+    db["one"].insert({"id": 1, "value": "left"})
+    db["two"].insert({"id": 2, "value": "right"})
+    print(list(db.query(
+        "select one.id, two.id, one.value, two.value from one, two"
+    )))
+    # [{'id': 1, 'id_2': 2, 'value': 'left', 'value_2': 'right'}]
+    print(list(db.query("select 1 as id, 2 as id, 3 as id_2")))
+    # [{'id': 1, 'id_3': 2, 'id_2': 3}]
+
+The same renaming is applied to rows returned by :ref:`table.rows_where() <python_api_rows>` and :ref:`table.search() <python_api_fts_search>`. It is available as the :ref:`dedupe_keys(keys) <reference_utils_dedupe_keys>` utility function. Use aliases such as ``select one.id as one_id, two.id as two_id`` if you want to control the names yourself.
+
 .. _python_api_execute:
 
 db.execute(sql, params)

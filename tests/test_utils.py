@@ -83,3 +83,26 @@ def test_maximize_csv_field_size_limit():
 )
 def test_flatten(input, expected):
     assert utils.flatten(input) == expected
+
+
+@pytest.mark.parametrize(
+    "keys,expected",
+    (
+        ([], []),
+        (["id", "name"], ["id", "name"]),
+        (["id", "id"], ["id", "id_2"]),
+        (["id", "id", "id"], ["id", "id_2", "id_3"]),
+        (["id", "id", "id_2"], ["id", "id_3", "id_2"]),
+        (["id_2", "id", "id"], ["id_2", "id", "id_3"]),
+        (["id", "id", "id_2", "id_2"], ["id", "id_3", "id_2", "id_2_2"]),
+        (["a", "b", "a", "b", "a"], ["a", "b", "a_2", "b_2", "a_3"]),
+    ),
+)
+def test_dedupe_keys(keys, expected):
+    assert utils.dedupe_keys(keys) == expected
+
+
+def test_dedupe_keys_accepts_any_iterable():
+    assert utils.dedupe_keys(iter(["id", "id"])) == ["id", "id_2"]
+    assert utils.dedupe_keys(key for key in ("a", "b")) == ["a", "b"]
+    assert utils.dedupe_keys(("a", "b")) == ["a", "b"]

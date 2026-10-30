@@ -746,6 +746,36 @@ def test_query_json_empty(db_path):
     assert result.output.strip() == "[]"
 
 
+_duplicate_columns_query = "select 1 as id, 2 as id, 'x' as value, 'y' as value"
+
+
+@pytest.mark.parametrize(
+    "sql,args,expected",
+    (
+        (
+            _duplicate_columns_query,
+            [],
+            '[{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}]',
+        ),
+        (
+            _duplicate_columns_query,
+            ["--nl"],
+            '{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}',
+        ),
+        ("select 1 as id, 2 as id, 3 as id_2", [], '[{"id": 1, "id_3": 2, "id_2": 3}]'),
+        (_duplicate_columns_query, ["--arrays"], '[[1, 2, "x", "y"]]'),
+        ("select 1 as id, 2 as id", ["--csv"], "id,id\n1,2"),
+        ("select 1 as id, 2 as id", ["--tsv"], "id\tid\n1\t2"),
+        ("select 1 as id, 2 as id", ["-t"], "id    id\n----  ----\n   1     2"),
+    ),
+)
+def test_query_duplicate_column_names(db_path, sql, args, expected):
+    Database(db_path).vacuum()
+    result = CliRunner().invoke(cli.cli, [db_path, sql] + args)
+    assert result.exit_code == 0, result.output
+    assert result.output.strip().replace("\r\n", "\n") == expected
+
+
 def test_query_invalid_function(db_path):
     result = CliRunner().invoke(
         cli.cli, [db_path, "select bad()", "--functions", "def invalid_python"]

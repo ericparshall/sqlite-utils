@@ -225,3 +225,31 @@ def test_execute_returning_dicts(fresh_db):
     assert fresh_db.execute_returning_dicts("select * from test") == [
         {"id": 1, "bar": 2}
     ]
+
+
+def test_query_duplicate_column_names(fresh_db):
+    fresh_db["one"].insert({"id": 1, "value": "left"})
+    fresh_db["two"].insert({"id": 2, "value": "right"})
+    rows = list(
+        fresh_db.query("select one.id, two.id, one.value, two.value from one, two")
+    )
+    assert rows == [{"id": 1, "id_2": 2, "value": "left", "value_2": "right"}]
+
+
+def test_query_duplicate_column_names_skip_existing(fresh_db):
+    rows = list(fresh_db.query("select 1 as id, 2 as id, 3 as id_2"))
+    assert rows == [{"id": 1, "id_3": 2, "id_2": 3}]
+    assert list(rows[0].keys()) == ["id", "id_3", "id_2"]
+
+
+def test_query_duplicate_column_names_returning(fresh_db):
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        pytest.skip("RETURNING requires SQLite 3.35.0 or higher")
+    fresh_db["dogs"].insert({"id": 1, "name": "Cleo"}, pk="id")
+    rows = list(
+        fresh_db.query(
+            "insert into dogs (id, name) values (2, 'Pancakes') "
+            "returning id, id, name"
+        )
+    )
+    assert rows == [{"id": 2, "id_2": 2, "name": "Pancakes"}]

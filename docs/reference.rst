@@ -115,3 +115,10 @@ sqlite_utils.utils.flatten
 --------------------------
 
 .. autofunction:: sqlite_utils.utils.flatten
+
+.. _reference_utils_dedupe_keys:
+
+sqlite_utils.utils.dedupe_keys
+------------------------------
+
+.. autofunction:: sqlite_utils.utils.dedupe_keys
