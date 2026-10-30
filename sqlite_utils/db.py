@@ -333,6 +333,17 @@ _TRANSACTION_CONTROL_PREFIXES = (
     "RELEASE",
 )
 
+# Statements that query() refuses to run: they either manipulate the
+# transaction that query() itself opens, or cannot run inside one at all
+_QUERY_REJECTED_PREFIXES = _TRANSACTION_CONTROL_PREFIXES + (
+    "VACUUM",
+    "ATTACH",
+    "DETACH",
+)
+
+# A write statement can only return rows through a RETURNING clause
+_RETURNING_RE = re.compile(r"\bRETURNING\b", re.IGNORECASE)
+
 
 class Database:
     """
@@ -654,31 +665,61 @@ class Database:
         The SQL is executed as soon as this method is called - the resulting rows
         are then fetched lazily as the returned iterable is iterated over.
 
+        A row-returning write such as ``INSERT ... RETURNING`` is committed
+        before this method returns, whether or not its rows are iterated over -
+        unless a transaction is already open, in which case it becomes part of
+        that transaction. See :ref:`python_api_transactions`.
+
         :param sql: SQL query to execute
         :param params: Parameters to use in that query - an iterable for ``where id = ?``
           parameters, or a dictionary for ``where id = :id``
         :raises ValueError: if the SQL statement does not return rows - use
-          :meth:`execute` for those statements instead
+          :meth:`execute` for those statements instead. The statement is
+          rolled back, so it has no effect on the database.
         """
-        was_in_transaction = self.conn.in_transaction
+        upper_sql = sql.lstrip().upper()
+        if upper_sql.startswith(_QUERY_REJECTED_PREFIXES):
+            raise ValueError(
+                "query() cannot be used with transaction control statements, "
+                "VACUUM, ATTACH or DETACH - use execute() for those instead"
+            )
+        if upper_sql.startswith("PRAGMA"):
+            # Some PRAGMA statements - "pragma journal_mode = wal" for example -
+            # cannot run inside a transaction, so these are executed directly
+            cursor = self._query_cursor(sql, params)
+            return self._query_rows(cursor, cursor)
+        # Everything else runs inside a transaction - or a savepoint if a
+        # transaction is already open - so a statement that turns out not to
+        # return rows, or that fails, can be rolled back without side effects
+        with self.atomic():
+            cursor = self._query_cursor(sql, params)
+            source: Iterable = cursor
+            if _RETURNING_RE.search(sql):
+                # A write statement cannot be committed - or released, in a
+                # savepoint - while its rows are still pending. Fetch them now
+                # so the write takes effect before this method returns, even
+                # if the caller never iterates over the results
+                source = cursor.fetchall()
+        return self._query_rows(cursor, source)
+
+    def _query_cursor(
+        self, sql: str, params: Optional[Union[Sequence, Dict[str, Any]]]
+    ) -> sqlite3.Cursor:
         cursor = self.execute(sql, params or tuple())
         if cursor.description is None:
             raise ValueError(
                 "query() can only be used with SQL that returns rows - "
                 "use execute() for other statements"
             )
+        return cursor
+
+    @staticmethod
+    def _query_rows(
+        cursor: sqlite3.Cursor, source: Iterable
+    ) -> Generator[dict, None, None]:
         keys = [d[0] for d in cursor.description]
-
-        def rows() -> Generator[dict, None, None]:
-            for row in cursor:
-                yield dict(zip(keys, row))
-            if not was_in_transaction and self.conn.in_transaction:
-                # A row-returning write such as INSERT ... RETURNING opened
-                # an implicit transaction - commit it now that its rows have
-                # been consumed
-                self.conn.execute("COMMIT")
-
-        return rows()
+        for row in source:
+            yield dict(zip(keys, row))
 
     def execute(
         self, sql: str, parameters: Optional[Union[Sequence, Dict[str, Any]]] = None

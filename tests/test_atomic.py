@@ -247,18 +247,34 @@ def test_execute_write_respects_explicit_transaction(fresh_db):
     assert [r["id"] for r in fresh_db["t"].rows] == [1]
 
 
-def test_query_returning_commits_after_iteration(tmpdir):
-    if sqlite3.sqlite_version_info < (3, 35, 0):
-        import pytest as _pytest
-
-        _pytest.skip("RETURNING requires SQLite 3.35.0 or higher")
+@pytest.mark.skipif(
+    sqlite3.sqlite_version_info < (3, 35, 0),
+    reason="RETURNING requires SQLite 3.35.0 or higher",
+)
+def test_query_returning_commits_without_iteration(tmpdir):
     path = str(tmpdir / "test.db")
     db = Database(path)
     db["t"].insert({"id": 1}, pk="id")
-    rows = list(db.query("insert into t (id) values (2) returning id"))
-    assert rows == [{"id": 2}]
+    rows = db.query("insert into t (id) values (2) returning id")
+    # Committed as soon as query() returns, before the rows are consumed
     assert not db.conn.in_transaction
     other = sqlite3.connect(path)
     assert other.execute("select count(*) from t").fetchone()[0] == 2
     other.close()
+    assert list(rows) == [{"id": 2}]
     db.close()
+
+
+def test_query_rejected_statement_does_not_commit_open_atomic_block(fresh_db):
+    fresh_db["t"].insert({"id": 1}, pk="id")
+    with pytest.raises(ValueError):
+        with fresh_db.atomic():
+            fresh_db["t"].insert({"id": 2})
+            with pytest.raises(ValueError):
+                fresh_db.query("delete from t")
+            # Still inside the atomic block, with the insert intact
+            assert fresh_db.conn.in_transaction
+            assert [r["id"] for r in fresh_db["t"].rows] == [1, 2]
+            raise ValueError("roll back the whole block")
+    assert not fresh_db.conn.in_transaction
+    assert [r["id"] for r in fresh_db["t"].rows] == [1]
