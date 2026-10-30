@@ -218,6 +218,56 @@ def test_query_insert_returning_respects_explicit_transaction(fresh_db):
     assert [row["name"] for row in fresh_db["dogs"].rows] == ["Cleo"]
 
 
+def test_query_duplicate_column_names(fresh_db):
+    # Columns sharing a name - common with joins - should not overwrite each
+    # other in the returned dictionaries
+    fresh_db["one"].insert({"id": 1, "value": "left"})
+    fresh_db["two"].insert({"id": 2, "value": "right"})
+    rows = list(
+        fresh_db.query("select one.id, two.id, one.value, two.value from one, two")
+    )
+    assert rows == [{"id": 1, "id_2": 2, "value": "left", "value_2": "right"}]
+
+
+@pytest.mark.parametrize(
+    "sql,expected",
+    [
+        ("select 1 as id, 2 as id, 3 as id", {"id": 1, "id_2": 2, "id_3": 3}),
+        # A suffixed name that collides with a real column is skipped
+        ("select 1 as id, 2 as id, 3 as id_2", {"id": 1, "id_3": 2, "id_2": 3}),
+        ("select 1 as id_2, 2 as id, 3 as id", {"id_2": 1, "id": 2, "id_3": 3}),
+        (
+            "select 1 as id, 2 as id, 3 as id_2, 4 as id_2",
+            {"id": 1, "id_3": 2, "id_2": 3, "id_2_2": 4},
+        ),
+    ],
+)
+def test_query_duplicate_column_names_suffixes(fresh_db, sql, expected):
+    assert list(fresh_db.query(sql)) == [expected]
+
+
+def test_query_duplicate_column_names_returning(fresh_db):
+    # The INSERT ... RETURNING path builds rows separately, check it too
+    fresh_db["dogs"].insert({"name": "Cleo"})
+    rows = list(
+        fresh_db.query(
+            "insert into dogs (name) values ('Pancakes') returning name, name"
+        )
+    )
+    assert rows == [{"name": "Pancakes", "name_2": "Pancakes"}]
+
+
+def test_query_duplicate_column_names_pragma(fresh_db):
+    # The PRAGMA path builds rows separately as well
+    fresh_db["dogs"].insert({"name": "Cleo"})
+    rows = list(fresh_db.query("pragma table_info(dogs)"))
+    assert rows[0]["name"] == "name"
+    # pragma_table_info() can be queried as a table function, so a duplicate
+    # column name can be requested through the regular path too
+    rows = list(fresh_db.query("select name, name from pragma_table_info('dogs')"))
+    assert rows == [{"name": "name", "name_2": "name"}]
+
+
 def test_execute_returning_dicts(fresh_db):
     # Like db.query() but returns a list, included for backwards compatibility
     # see https://github.com/simonw/sqlite-utils/issues/290

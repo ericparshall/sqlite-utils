@@ -34,6 +34,7 @@ from .utils import (
     OperationalError,
     _compile_code,
     chunks,
+    dedupe_keys,
     file_progress,
     find_spatialite,
     flatten as _flatten,
@@ -3498,6 +3499,9 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
     # the last row.
     current_iter, next_iter = itertools.tee(iterator, 2)
     next(next_iter, None)
+    # Duplicate column names would otherwise overwrite each other in the
+    # output dictionaries, losing values - rename them to keep every value
+    keys = dedupe_keys(headers)
     first = True
     for row, next_row in itertools.zip_longest(current_iter, next_iter):
         is_last = next_row is None
@@ -3506,7 +3510,7 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
             # Any value that is a valid JSON string should be treated as JSON
             data = [maybe_json(value) for value in data]
         if not arrays:
-            data = dict(zip(headers, data))
+            data = dict(zip(keys, data))
         line = "{firstchar}{serialized}{maybecomma}{lastchar}".format(
             firstchar=("[" if first else " ") if not nl else "",
             serialized=json.dumps(data, default=json_binary),

@@ -70,6 +70,15 @@ def test_rows_where_offset_limit(fresh_db, offset, limit, expected):
     ]
 
 
+def test_rows_where_duplicate_select_columns(fresh_db):
+    table = fresh_db["rows"]
+    table.insert_all([{"id": 1, "name": "Cleo"}, {"id": 2, "name": "Pancakes"}])
+    assert list(table.rows_where(select="id, id, name", order_by="id")) == [
+        {"id": 1, "id_2": 1, "name": "Cleo"},
+        {"id": 2, "id_2": 2, "name": "Pancakes"},
+    ]
+
+
 def test_pks_and_rows_where_rowid(fresh_db):
     table = fresh_db["rowid_table"]
     table.insert_all({"number": i + 10} for i in range(3))

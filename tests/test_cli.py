@@ -738,6 +738,34 @@ def test_query_json(db_path, sql, args, expected):
     assert expected == result.output.strip()
 
 
+_duplicate_columns_query = "select 1 as id, 2 as id, 'x' as value, 'y' as value"
+
+
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        ([], '[{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}]'),
+        (["--nl"], '{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}'),
+        (["--arrays"], '[[1, 2, "x", "y"]]'),
+        # CSV, TSV and table output keep the original duplicate headers
+        (["--csv"], "id,id,value,value\n1,2,x,y"),
+        (["--tsv"], "id\tid\tvalue\tvalue\n1\t2\tx\ty"),
+        (
+            ["-t"],
+            "id    id  value    value\n----  ----  -------  -------\n   1     2  x        y",
+        ),
+        (
+            ["--fmt", "github"],
+            "|   id |   id | value   | value   |\n|------|------|---------|---------|\n|    1 |    2 | x       | y       |",
+        ),
+    ],
+)
+def test_query_duplicate_column_names(db_path, args, expected):
+    result = CliRunner().invoke(cli.cli, [db_path, _duplicate_columns_query] + args)
+    assert result.exit_code == 0, result.output
+    assert result.output.strip().replace("\r", "") == expected
+
+
 def test_query_json_empty(db_path):
     result = CliRunner().invoke(
         cli.cli,
