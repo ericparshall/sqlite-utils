@@ -247,7 +247,7 @@ def test_execute_write_respects_explicit_transaction(fresh_db):
     assert [r["id"] for r in fresh_db["t"].rows] == [1]
 
 
-def test_query_returning_commits_after_iteration(tmpdir):
+def test_query_returning_commits_before_iteration(tmpdir):
     if sqlite3.sqlite_version_info < (3, 35, 0):
         import pytest as _pytest
 
@@ -255,10 +255,11 @@ def test_query_returning_commits_after_iteration(tmpdir):
     path = str(tmpdir / "test.db")
     db = Database(path)
     db["t"].insert({"id": 1}, pk="id")
-    rows = list(db.query("insert into t (id) values (2) returning id"))
-    assert rows == [{"id": 2}]
+    rows = db.query("insert into t (id) values (2) returning id")
+    # The write is committed before the rows are iterated
     assert not db.conn.in_transaction
     other = sqlite3.connect(path)
     assert other.execute("select count(*) from t").fetchone()[0] == 2
     other.close()
+    assert list(rows) == [{"id": 2}]
     db.close()
