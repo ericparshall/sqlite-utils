@@ -229,9 +229,13 @@ The ``db.query(sql)`` function executes a SQL query and returns an iterator over
     # {'name': 'Cleo'}
     # {'name': 'Pancakes'}
 
-The SQL query is executed as soon as ``db.query()`` is called. The resulting rows are fetched lazily as you iterate, so large result sets are not loaded into memory all at once. Because execution is immediate, an error in your SQL will raise an exception straight away, and a statement such as ``INSERT ... RETURNING`` will take effect even if you do not iterate over its results.
+The SQL query is executed as soon as ``db.query()`` is called. For statements that only read from the database, the resulting rows are fetched lazily as you iterate, so large result sets are not loaded into memory all at once. Because execution is immediate, an error in your SQL will raise an exception straight away, without leaving a transaction open.
 
-``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, for example - will raise a ``ValueError``. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
+``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, or ``PRAGMA user_version = 5``, for example - raises a ``ValueError``. The statement is rolled back, so it has no effect on the database and leaves no transaction open. If a transaction is already open - because of ``db.begin()`` or a ``db.atomic()`` block - only the rejected statement is undone: the transaction stays open and the writes made before it survive a later ``db.commit()``. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
+
+Statements that control transactions (``BEGIN``, ``COMMIT``, ``END``, ``ROLLBACK``, ``SAVEPOINT`` and ``RELEASE``), as well as ``VACUUM``, ``ATTACH`` and ``DETACH``, raise a ``ValueError`` without being executed.
+
+A row-returning write such as ``INSERT``, ``UPDATE`` or ``DELETE`` with a ``RETURNING`` clause is committed by the time ``db.query()`` returns, whether its results are iterated fully, partially or not at all - other connections see the change straight away. If a transaction is already open it becomes part of that transaction instead, so a later ``db.rollback()`` undoes it. Iterating still yields the returned rows as dictionaries. Row-returning ``PRAGMA`` statements, such as ``PRAGMA journal_mode = wal``, continue to work as normal.
 
 .. _python_api_execute:
 
@@ -356,7 +360,7 @@ If a transaction is open - because the call happens inside a ``db.atomic()`` blo
         db.execute("insert into news (headline) values (?)", ["Cat unimpressed"])
     # Both rows committed together
 
-One corner case: a row-returning write such as ``INSERT ... RETURNING`` executed through ``db.execute()`` cannot be auto-committed, because its rows have not been read yet - call ``db.commit()`` after fetching them, or use :ref:`db.query() <python_api_query>` for those statements, which commits automatically once you have iterated over the results.
+One corner case: a row-returning write such as ``INSERT ... RETURNING`` executed through ``db.execute()`` cannot be auto-committed, because its rows have not been read yet - call ``db.commit()`` after fetching them, or use :ref:`db.query() <python_api_query>` for those statements, which commits them before it returns.
 
 .. _python_api_transactions_manual:
 

@@ -333,6 +333,31 @@ _TRANSACTION_CONTROL_PREFIXES = (
     "RELEASE",
 )
 
+# Statements that query() refuses to run because they either control
+# transactions or cannot safely run inside one
+_QUERY_DISALLOWED_KEYWORDS = frozenset(
+    _TRANSACTION_CONTROL_PREFIXES + ("VACUUM", "ATTACH", "DETACH")
+)
+
+
+def _strip_leading_sql_noise(sql: str) -> str:
+    match = re.match(r"(?:\s+|--[^\n]*(?:\n|$)|/\*.*?\*/)*", sql, re.DOTALL)
+    return sql[match.end() :] if match else sql
+
+
+def _leading_sql_keyword(sql: str) -> str:
+    match = re.match(r"([A-Za-z_]+)", _strip_leading_sql_noise(sql))
+    return match.group(1).upper() if match else ""
+
+
+def _pragma_name(sql: str) -> str:
+    match = re.match(
+        r"PRAGMA\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?([A-Za-z_][A-Za-z0-9_]*)",
+        _strip_leading_sql_noise(sql),
+        re.IGNORECASE,
+    )
+    return match.group(1).upper() if match else ""
+
 
 class Database:
     """
@@ -652,31 +677,88 @@ class Database:
         Execute ``sql`` and return an iterable of dictionaries representing each row.
 
         The SQL is executed as soon as this method is called - the resulting rows
-        are then fetched lazily as the returned iterable is iterated over.
+        are then fetched lazily as the returned iterable is iterated over, unless
+        the statement is a row-returning write such as ``INSERT ... RETURNING``,
+        which is committed before this method returns.
 
         :param sql: SQL query to execute
         :param params: Parameters to use in that query - an iterable for ``where id = ?``
           parameters, or a dictionary for ``where id = :id``
-        :raises ValueError: if the SQL statement does not return rows - use
-          :meth:`execute` for those statements instead
+        :raises ValueError: if the SQL statement does not return rows, or if it
+          controls transactions or cannot run inside one - use :meth:`execute`
+          for those statements instead
         """
-        was_in_transaction = self.conn.in_transaction
-        cursor = self.execute(sql, params or tuple())
+        keyword = _leading_sql_keyword(sql)
+        if keyword in _QUERY_DISALLOWED_KEYWORDS:
+            raise ValueError(
+                "query() can only be used with SQL that returns rows - "
+                "use execute() for other statements"
+            )
+        params = params or tuple()
+        if self._tracer:
+            self._tracer(sql, params)
+
+        # Changing the journal mode cannot happen inside a transaction, so
+        # journal_mode PRAGMAs are executed directly rather than in a savepoint
+        if keyword == "PRAGMA" and _pragma_name(sql) == "JOURNAL_MODE":
+            cursor = self.conn.execute(sql, params)
+            if cursor.description is None:
+                raise ValueError(
+                    "query() can only be used with SQL that returns rows - "
+                    "use execute() for other statements"
+                )
+            keys = [d[0] for d in cursor.description]
+
+            def pragma_rows() -> Generator[dict, None, None]:
+                for row in cursor:
+                    yield dict(zip(keys, row))
+
+            return pragma_rows()
+
+        savepoint = "sqlite_utils_query_{}".format(secrets.token_hex(16))
+
+        def rollback_savepoint() -> None:
+            try:
+                self.conn.execute("ROLLBACK TO SAVEPOINT {}".format(savepoint))
+            finally:
+                self.conn.execute("RELEASE SAVEPOINT {}".format(savepoint))
+
+        self.conn.execute("SAVEPOINT {}".format(savepoint))
+        try:
+            cursor = self.conn.execute(sql, params)
+        except BaseException:
+            rollback_savepoint()
+            raise
         if cursor.description is None:
+            # Statements that return no rows are rejected without changing the
+            # database or leaving an implicit transaction open
+            rollback_savepoint()
             raise ValueError(
                 "query() can only be used with SQL that returns rows - "
                 "use execute() for other statements"
             )
         keys = [d[0] for d in cursor.description]
+        try:
+            self.conn.execute("RELEASE SAVEPOINT {}".format(savepoint))
+        except sqlite3.OperationalError:
+            # A row-returning write holds its statement open until all rows
+            # have been fetched, which prevents the savepoint from being
+            # released - fetch the rows first, then release it
+            try:
+                fetched = [dict(zip(keys, row)) for row in cursor]
+                self.conn.execute("RELEASE SAVEPOINT {}".format(savepoint))
+            except BaseException:
+                rollback_savepoint()
+                raise
+
+            def fetched_rows() -> Generator[dict, None, None]:
+                yield from fetched
+
+            return fetched_rows()
 
         def rows() -> Generator[dict, None, None]:
             for row in cursor:
                 yield dict(zip(keys, row))
-            if not was_in_transaction and self.conn.in_transaction:
-                # A row-returning write such as INSERT ... RETURNING opened
-                # an implicit transaction - commit it now that its rows have
-                # been consumed
-                self.conn.execute("COMMIT")
 
         return rows()
 
