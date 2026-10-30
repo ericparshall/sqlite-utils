@@ -18,7 +18,7 @@ from sqlite_utils.db import (
     quote_identifier,
 )
 from sqlite_utils.plugins import ensure_plugins_loaded, pm, get_plugins
-from sqlite_utils.utils import maximize_csv_field_size_limit
+from sqlite_utils.utils import dedupe_keys, maximize_csv_field_size_limit
 from sqlite_utils import recipes
 import textwrap
 import inspect
@@ -3499,6 +3499,8 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
     current_iter, next_iter = itertools.tee(iterator, 2)
     next(next_iter, None)
     first = True
+    # Rename duplicate column names, e.g. from a join, so no values are lost
+    keys = dedupe_keys(headers)
     for row, next_row in itertools.zip_longest(current_iter, next_iter):
         is_last = next_row is None
         data = row
@@ -3506,7 +3508,7 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
             # Any value that is a valid JSON string should be treated as JSON
             data = [maybe_json(value) for value in data]
         if not arrays:
-            data = dict(zip(headers, data))
+            data = dict(zip(keys, data))
         line = "{firstchar}{serialized}{maybecomma}{lastchar}".format(
             firstchar=("[" if first else " ") if not nl else "",
             serialized=json.dumps(data, default=json_binary),

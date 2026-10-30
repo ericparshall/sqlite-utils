@@ -45,6 +45,18 @@ The default format returned for queries is JSON:
     [{"id": 1, "age": 4, "name": "Cleo"},
      {"id": 2, "age": 2, "name": "Pancakes"}]
 
+If a query returns more than one column with the same name, later duplicates are renamed with a numeric suffix so that no values are lost from the JSON objects. A suffix that would collide with another column name is skipped:
+
+.. code-block:: bash
+
+    sqlite-utils dogs.db "select 1 as id, 2 as id, 'x' as value, 'y' as value"
+
+.. code-block:: output
+
+    [{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}]
+
+This applies to both JSON and :ref:`newline-delimited JSON <cli_query_nl>` output. CSV, TSV and table output keep the original column headers, including any duplicates.
+
 .. _cli_query_nl:
 
 Newline-delimited JSON
