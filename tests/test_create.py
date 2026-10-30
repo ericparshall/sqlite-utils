@@ -10,6 +10,7 @@ from sqlite_utils.db import (
     View,
     NoTable,
     NoView,
+    TransactionError,
 )
 from sqlite_utils.utils import hash_record, sqlite3
 import collections
@@ -979,6 +980,116 @@ def test_insert_hash_id_columns(fresh_db, use_table_factory):
 def test_vacuum(fresh_db):
     fresh_db["data"].insert({"foo": "foo", "bar": "bar"})
     fresh_db.vacuum()
+
+
+def _populate_vacuum_source(db):
+    db.executescript("""
+        CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO authors (name) VALUES ('Sally'), ('Terry');
+        CREATE TABLE books (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            author_id INTEGER REFERENCES authors(id)
+        );
+        INSERT INTO books (title, author_id)
+            VALUES ('Book one', 1), ('Book two', 2);
+        CREATE INDEX idx_books_title ON books(title);
+        CREATE VIEW book_titles AS SELECT title FROM books;
+        CREATE TRIGGER books_insert AFTER INSERT ON books BEGIN
+            UPDATE books SET title = title WHERE id = new.id;
+        END;
+        """)
+
+
+def test_vacuum_into_file(tmpdir):
+    source_path = str(tmpdir / "source.db")
+    target_path = tmpdir / "backup.db"
+    db = Database(source_path)
+    _populate_vacuum_source(db)
+    expected_schema = db.schema
+    expected_rows = list(db["books"].rows)
+    assert db.vacuum(into=target_path) is None
+    # Original is unchanged and still usable
+    assert db.schema == expected_schema
+    assert list(db["books"].rows) == expected_rows
+    # Copy has the same schema, rows, indexes, views and triggers
+    backup = Database(str(target_path))
+    assert backup.schema == expected_schema
+    assert list(backup["books"].rows) == expected_rows
+    assert [index.name for index in backup["books"].indexes] == ["idx_books_title"]
+    assert backup.view_names() == ["book_titles"]
+    assert backup.triggers_dict["books_insert"] == db.triggers_dict["books_insert"]
+
+
+def test_vacuum_into_memory_database(fresh_db, tmpdir):
+    _populate_vacuum_source(fresh_db)
+    target_path = tmpdir / "backup.db"
+    fresh_db.vacuum(into=target_path)
+    backup = Database(str(target_path))
+    assert backup.schema == fresh_db.schema
+    assert list(backup["books"].rows) == list(fresh_db["books"].rows)
+    assert backup.view_names() == ["book_titles"]
+
+
+def test_vacuum_into_path_with_spaces_and_quotes(tmpdir):
+    subdir = tmpdir.mkdir("some directory")
+    target_path = subdir / "it's a backup.db"
+    db = Database(memory=True)
+    db["data"].insert({"foo": "bar"})
+    db.vacuum(into=target_path)
+    assert list(Database(str(target_path))["data"].rows) == [{"foo": "bar"}]
+
+
+def test_vacuum_into_existing_file_raises(tmpdir):
+    target_path = tmpdir / "backup.db"
+    target_path.write_binary(b"")
+    db = Database(memory=True)
+    db["data"].insert({"foo": "bar"})
+    with pytest.raises(FileExistsError):
+        db.vacuum(into=str(target_path))
+    assert target_path.read_binary() == b""
+
+
+def test_vacuum_into_inside_transaction_raises(tmpdir):
+    target_path = tmpdir / "backup.db"
+    db = Database(memory=True)
+    db["data"].insert({"id": 1})
+    db.begin()
+    db["data"].insert({"id": 2})
+    with pytest.raises(TransactionError):
+        db.vacuum(into=target_path)
+    assert not target_path.exists()
+    assert db.conn.in_transaction
+    assert db["data"].count == 2
+    db.rollback()
+    assert db["data"].count == 1
+
+
+def test_vacuum_into_inside_atomic_raises(tmpdir):
+    target_path = tmpdir / "backup.db"
+    db = Database(memory=True)
+    db["data"].insert({"id": 1})
+    with db.atomic():
+        db["data"].insert({"id": 2})
+        with pytest.raises(TransactionError):
+            db.vacuum(into=target_path)
+        assert db.conn.in_transaction
+        assert db["data"].count == 2
+    assert db["data"].count == 2
+    assert not target_path.exists()
+
+
+def test_vacuum_into_is_traced(tmpdir):
+    target_path = tmpdir / "it's a backup.db"
+    db = Database(memory=True)
+    db["data"].insert({"foo": "bar"})
+    traced = []
+    with db.tracer(lambda sql, parameters: traced.append((sql, parameters))):
+        db.vacuum(into=target_path)
+    assert (
+        "VACUUM INTO '{}';".format(str(target_path).replace("'", "''")),
+        None,
+    ) in traced
 
 
 def test_works_with_pathlib_path(tmpdir):

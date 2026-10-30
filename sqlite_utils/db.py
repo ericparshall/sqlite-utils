@@ -1484,9 +1484,24 @@ class Database:
                 if fk.column not in existing_indexes:
                     table.create_index([fk.column], find_unique_name=True)
 
-    def vacuum(self) -> None:
-        "Run a SQLite ``VACUUM`` against the database."
-        self.execute("VACUUM;")
+    def vacuum(self, into: Optional[Union[str, pathlib.Path]] = None) -> None:
+        """
+        Run a SQLite ``VACUUM`` against the database.
+
+        :param into: Optional path to write a compacted copy of the database to,
+          using ``VACUUM INTO``. The original database is left unchanged. This
+          also works for in-memory databases.
+        :raises FileExistsError: if ``into`` already exists
+        :raises TransactionError: if ``into`` is used while a transaction is open
+        """
+        if into is None:
+            self.execute("VACUUM;")
+            return
+        path = pathlib.Path(into)
+        if path.exists():
+            raise FileExistsError("File already exists: {}".format(path))
+        self._ensure_no_open_transaction("vacuum(into=...)")
+        self.execute("VACUUM INTO '{}';".format(str(path).replace("'", "''")))
 
     def analyze(self, name: Optional[str] = None) -> None:
         """
