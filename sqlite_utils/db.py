@@ -333,6 +333,36 @@ _TRANSACTION_CONTROL_PREFIXES = (
     "RELEASE",
 )
 
+# Statements that db.query() refuses to run at all: they return no rows, and
+# cannot be safely executed inside the savepoint that query() uses to undo
+# rejected statements
+_QUERY_REJECTED_KEYWORDS = {
+    "BEGIN",
+    "COMMIT",
+    "END",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "RELEASE",
+    "VACUUM",
+    "ATTACH",
+    "DETACH",
+}
+
+# Matches the first keyword of a SQL statement, skipping whitespace and comments
+_leading_keyword_re = re.compile(
+    r"(?:\s+|--[^\n]*(?:\n|$)|/\*.*?(?:\*/|$))*([A-Za-z]+)", re.DOTALL
+)
+
+_QUERY_NO_ROWS_MESSAGE = (
+    "query() can only be used with SQL that returns rows - "
+    "use execute() for other statements"
+)
+
+
+def _leading_keyword(sql: str) -> Optional[str]:
+    match = _leading_keyword_re.match(sql)
+    return match.group(1).upper() if match else None
+
 
 class Database:
     """
@@ -654,31 +684,91 @@ class Database:
         The SQL is executed as soon as this method is called - the resulting rows
         are then fetched lazily as the returned iterable is iterated over.
 
+        A row-returning write such as ``INSERT ... RETURNING`` is committed
+        before this method returns, unless a transaction is already open, in
+        which case it becomes part of that transaction.
+
+        A statement that is rejected because it does not return rows has no
+        effect on the database.
+
         :param sql: SQL query to execute
         :param params: Parameters to use in that query - an iterable for ``where id = ?``
           parameters, or a dictionary for ``where id = :id``
         :raises ValueError: if the SQL statement does not return rows - use
           :meth:`execute` for those statements instead
         """
-        was_in_transaction = self.conn.in_transaction
-        cursor = self.execute(sql, params or tuple())
+        params = params or tuple()
+        keyword = _leading_keyword(sql)
+        if keyword in _QUERY_REJECTED_KEYWORDS:
+            raise ValueError(_QUERY_NO_ROWS_MESSAGE)
+        pending_rows: Optional[List[tuple]] = None
+        if keyword == "PRAGMA" and self._is_read_only_row_pragma(sql, params):
+            # Some row-returning PRAGMAs, such as journal_mode = wal, cannot
+            # run inside the savepoint used below - run them directly, since
+            # a PRAGMA that does not write to the database has nothing to undo
+            cursor = self.execute(sql, params)
+        else:
+            cursor, pending_rows = self._query_in_savepoint(sql, params)
         if cursor.description is None:
-            raise ValueError(
-                "query() can only be used with SQL that returns rows - "
-                "use execute() for other statements"
-            )
+            raise ValueError(_QUERY_NO_ROWS_MESSAGE)
         keys = [d[0] for d in cursor.description]
 
         def rows() -> Generator[dict, None, None]:
-            for row in cursor:
+            for row in cursor if pending_rows is None else pending_rows:
                 yield dict(zip(keys, row))
-            if not was_in_transaction and self.conn.in_transaction:
-                # A row-returning write such as INSERT ... RETURNING opened
-                # an implicit transaction - commit it now that its rows have
-                # been consumed
-                self.conn.execute("COMMIT")
 
         return rows()
+
+    def _is_read_only_row_pragma(
+        self, sql: str, params: Union[Sequence, Dict[str, Any]]
+    ) -> bool:
+        # Inspect the compiled program: a PRAGMA that produces rows contains a
+        # ResultRow instruction, and one that writes to the database - such as
+        # user_version = 5 - opens a write transaction
+        program = self.conn.execute("EXPLAIN " + sql, params).fetchall()
+        returns_rows = any(row[1] == "ResultRow" for row in program)
+        writes = any(row[1] == "Transaction" and row[3] for row in program)
+        return returns_rows and not writes
+
+    def _query_in_savepoint(
+        self, sql: str, params: Union[Sequence, Dict[str, Any]]
+    ) -> Tuple[sqlite3.Cursor, Optional[List[tuple]]]:
+        # Run the statement inside a savepoint, so it can be undone if it
+        # fails or turns out not to return rows. Releasing the savepoint
+        # commits the statement, or merges it into an already open transaction
+        savepoint = "sqlite_utils_query_{}".format(secrets.token_hex(16))
+        self.conn.execute("SAVEPOINT {};".format(savepoint))
+
+        def undo() -> None:
+            if not self.conn.in_transaction:
+                # SQLite already rolled back the whole transaction, for
+                # example after an ON CONFLICT ROLLBACK constraint failure
+                return
+            self.conn.execute("ROLLBACK TO SAVEPOINT {};".format(savepoint))
+            self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+
+        try:
+            cursor = self.execute(sql, params)
+        except BaseException:
+            undo()
+            raise
+        if cursor.description is None:
+            undo()
+            return cursor, None
+        pending_rows = None
+        try:
+            self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+        except sqlite3.OperationalError:
+            # A write such as INSERT ... RETURNING cannot be released while
+            # its statement is still in progress - fetch all of its rows
+            # first. A plain SELECT releases fine and stays lazy.
+            try:
+                pending_rows = cursor.fetchall()
+                self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+            except BaseException:
+                undo()
+                raise
+        return cursor, pending_rows
 
     def execute(
         self, sql: str, parameters: Optional[Union[Sequence, Dict[str, Any]]] = None
