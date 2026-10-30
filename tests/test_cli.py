@@ -738,6 +738,43 @@ def test_query_json(db_path, sql, args, expected):
     assert expected == result.output.strip()
 
 
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        ([], '[{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}]'),
+        (["--nl"], '{"id": 1, "id_2": 2, "value": "x", "value_2": "y"}'),
+        (["--arrays"], '[[1, 2, "x", "y"]]'),
+    ],
+)
+def test_query_duplicate_column_names_json(db_path, args, expected):
+    result = CliRunner().invoke(
+        cli.cli,
+        [
+            db_path,
+            "select 1 as id, 2 as id, 'x' as value, 'y' as value",
+        ]
+        + args,
+    )
+    assert result.exit_code == 0
+    assert result.output.strip() == expected
+
+
+@pytest.mark.parametrize(
+    "format,expected",
+    [
+        ("--csv", "id,id,value,value\n1,2,x,y"),
+        ("--tsv", "id\tid\tvalue\tvalue\n1\t2\tx\ty"),
+    ],
+)
+def test_query_duplicate_column_names_csv_keeps_headers(db_path, format, expected):
+    result = CliRunner().invoke(
+        cli.cli,
+        [db_path, "select 1 as id, 2 as id, 'x' as value, 'y' as value", format],
+    )
+    assert result.exit_code == 0
+    assert result.output.replace("\r", "").strip() == expected
+
+
 def test_query_json_empty(db_path):
     result = CliRunner().invoke(
         cli.cli,

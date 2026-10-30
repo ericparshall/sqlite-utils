@@ -34,6 +34,7 @@ from .utils import (
     OperationalError,
     _compile_code,
     chunks,
+    dedupe_keys,
     file_progress,
     find_spatialite,
     flatten as _flatten,
@@ -3493,6 +3494,8 @@ FILE_COLUMNS = {
 
 
 def output_rows(iterator, headers, nl, arrays, json_cols):
+    if not arrays:
+        headers = dedupe_keys(headers)
     # We have to iterate two-at-a-time so we can know if we
     # should output a trailing comma or if we have reached
     # the last row.

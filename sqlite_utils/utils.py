@@ -582,6 +582,45 @@ def chunks(sequence: Iterable[T], size: int) -> Iterable[Iterable[T]]:
         yield itertools.chain([item], itertools.islice(iterator, size - 1))
 
 
+def dedupe_keys(keys: Iterable[str]) -> List[str]:
+    """
+    Return a list of unique column names for the given keys.
+
+    The first occurrence of each name is kept as-is. Later duplicates are
+    given a numeric suffix of ``_2``, ``_3`` and so on. A suffix that would
+    collide with another key in the same result is skipped.
+
+    .. code-block:: python
+
+        from sqlite_utils.utils import dedupe_keys
+
+        dedupe_keys(["id", "id", "id"])
+        # Returns ['id', 'id_2', 'id_3']
+
+        dedupe_keys(["id", "id", "id_2"])
+        # Returns ['id', 'id_3', 'id_2']
+
+    :param keys: Any iterable of column names
+    """
+    keys = list(keys)
+    used = set(keys)
+    seen: Set[str] = set()
+    output: List[str] = []
+    for key in keys:
+        if key not in seen:
+            seen.add(key)
+            output.append(key)
+            continue
+        suffix = 2
+        candidate = "{}_{}".format(key, suffix)
+        while candidate in used:
+            suffix += 1
+            candidate = "{}_{}".format(key, suffix)
+        used.add(candidate)
+        output.append(candidate)
+    return output
+
+
 def hash_record(record: Dict[str, Any], keys: Optional[Iterable[str]] = None) -> str:
     """
     ``record`` should be a Python dictionary. Returns a sha1 hash of the

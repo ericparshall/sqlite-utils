@@ -39,6 +39,26 @@ def test_chunks(size, expected):
     assert chunks == expected
 
 
+@pytest.mark.parametrize(
+    "keys,expected",
+    [
+        ([], []),
+        (["id"], ["id"]),
+        (["id", "name", "age"], ["id", "name", "age"]),
+        (["id", "id", "id"], ["id", "id_2", "id_3"]),
+        (["id_2", "id", "id"], ["id_2", "id", "id_3"]),
+        (["id", "id", "id_2", "id_2"], ["id", "id_3", "id_2", "id_2_2"]),
+        (["id", "id", "id_2"], ["id", "id_3", "id_2"]),
+    ],
+)
+def test_dedupe_keys(keys, expected):
+    assert utils.dedupe_keys(keys) == expected
+
+
+def test_dedupe_keys_returns_list_for_iterables():
+    assert utils.dedupe_keys(iter(["id", "id"])) == ["id", "id_2"]
+
+
 def test_hash_record():
     expected = "d383e7c0ba88f5ffcdd09be660de164b3847401a"
     assert utils.hash_record({"name": "Cleo", "twitter": "CleoPaws"}) == expected

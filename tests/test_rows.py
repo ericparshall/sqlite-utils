@@ -7,6 +7,17 @@ def test_rows(existing_db):
     )
 
 
+def test_rows_where_dedupes_duplicate_column_names(fresh_db):
+    table = fresh_db["t"]
+    table.insert({"id": 1, "name": "x"})
+    assert list(table.rows_where(select="id, id, name")) == [
+        {"id": 1, "id_2": 1, "name": "x"}
+    ]
+    assert list(table.rows_where(select="id, id, 1 as id_2")) == [
+        {"id": 1, "id_3": 1, "id_2": 1}
+    ]
+
+
 @pytest.mark.parametrize(
     "where,where_args,expected_ids",
     [

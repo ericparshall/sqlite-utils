@@ -233,6 +233,8 @@ The SQL query is executed as soon as ``db.query()`` is called. The resulting row
 
 ``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, for example - will raise a ``ValueError``. The rejected statement is rolled back, so it has no effect on the database. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
 
+If a query returns more than one column with the same name - common when joining tables - later duplicates are renamed so that no values are lost. The first occurrence keeps its name and subsequent duplicates get a numeric suffix: ``id, id, id`` becomes ``id, id_2, id_3``. A suffix that would collide with another column name in the same result is skipped, so ``id, id, id_2`` becomes ``id, id_3, id_2``. Use :ref:`sqlite_utils.utils.dedupe_keys() <reference_utils_dedupe_keys>` to apply the same rules to a list of names.
+
 .. _python_api_execute:
 
 db.execute(sql, params)
@@ -502,6 +504,8 @@ To return custom columns (instead of the default that uses ``select *``) pass ``
     >>> for row in db.table("dogs").rows_where(select='name, age'):
     ...     print(row)
     {'name': 'Cleo', 'age': 4}
+
+If ``select`` includes the same column name more than once, later duplicates are renamed using ``_2``, ``_3`` suffixes - matching :ref:`db.query() <python_api_query>` - so that no value is lost.
 
 To specify an order, use the ``order_by=`` argument::
 
@@ -2610,7 +2614,7 @@ The ``.search()`` method also accepts the following optional parameters:
     The column to sort by. Defaults to relevance score. Can optionally include a ``desc``, e.g. ``rowid desc``.
 
 ``columns`` array of strings
-    Columns to return. Defaults to all columns.
+    Columns to return. Defaults to all columns. If a column is listed more than once, later duplicates are renamed using ``_2``, ``_3`` suffixes - matching :ref:`db.query() <python_api_query>` - so that no value is lost.
 
 ``limit`` integer
     Number of results to return. Defaults to all results.

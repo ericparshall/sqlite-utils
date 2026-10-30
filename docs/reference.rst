@@ -109,6 +109,13 @@ sqlite_utils.utils.chunks
 
 .. autofunction:: sqlite_utils.utils.chunks
 
+.. _reference_utils_dedupe_keys:
+
+sqlite_utils.utils.dedupe_keys
+------------------------------
+
+.. autofunction:: sqlite_utils.utils.dedupe_keys
+
 .. _reference_utils_flatten:
 
 sqlite_utils.utils.flatten

@@ -11,6 +11,29 @@ def test_query(fresh_db):
     assert list(results) == [{"name": "Pancakes"}, {"name": "Cleo"}]
 
 
+@pytest.mark.parametrize(
+    "sql,expected",
+    [
+        ("select 1 as id, 2 as id", [{"id": 1, "id_2": 2}]),
+        ("select 1 as id, 2 as id, 3 as id", [{"id": 1, "id_2": 2, "id_3": 3}]),
+        (
+            "select 1 as id, 2 as id, 3 as id_2",
+            [{"id": 1, "id_3": 2, "id_2": 3}],
+        ),
+    ],
+)
+def test_query_dedupes_duplicate_column_names(fresh_db, sql, expected):
+    assert list(fresh_db.query(sql)) == expected
+
+
+def test_query_dedupes_duplicate_column_names_from_join(fresh_db):
+    fresh_db["one"].insert({"id": 1, "value": "left"})
+    fresh_db["two"].insert({"id": 2, "value": "right"})
+    assert list(
+        fresh_db.query("select one.id, two.id, one.value, two.value from one, two")
+    ) == [{"id": 1, "id_2": 2, "value": "left", "value_2": "right"}]
+
+
 def test_query_executes_eagerly(fresh_db):
     # The SQL runs when query() is called, not when the result is iterated,
     # so errors are raised at the call site
