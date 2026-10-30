@@ -2777,6 +2777,17 @@ You can optimize your database by running VACUUM against it like so:
 
     Database("my_database.db").vacuum()
 
+Pass ``into=`` a path - a string or a ``pathlib.Path`` - to use `VACUUM INTO <https://www.sqlite.org/lang_vacuum.html#vacuum_with_an_into_clause>`__ to write a vacuumed, compacted copy of the database to a new file instead. The original database is left unchanged:
+
+.. code-block:: python
+
+    db = Database("my_database.db")
+    db.vacuum(into="backup.db")
+
+This also works for in-memory databases, which makes it a convenient way to save a snapshot of one to disk.
+
+If the destination file already exists a ``FileExistsError`` is raised. Calling ``vacuum(into=...)`` while a transaction is open raises a ``sqlite_utils.db.TransactionError``.
+
 .. _python_api_wal:
 
 WAL mode
