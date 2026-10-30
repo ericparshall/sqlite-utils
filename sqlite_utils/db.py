@@ -333,6 +333,56 @@ _TRANSACTION_CONTROL_PREFIXES = (
     "RELEASE",
 )
 
+# Leading whitespace and SQL comments, skipped when inspecting the first
+# keyword of a statement
+_leading_whitespace_and_comments_re = re.compile(
+    r"(?:\s+|--[^\n]*(?:\n|$)|/\*.*?(?:\*/|$))*", re.DOTALL
+)
+_explain_re = re.compile(r"explain\b", re.IGNORECASE)
+_pragma_re = re.compile(
+    r"pragma\s+(?:(?:\w+|\"[^\"]*\"|\[[^\]]*\]|`[^`]*`)\s*\.\s*)?"
+    r"(?P<name>\w+)\s*(?P<value>[=(])?",
+    re.IGNORECASE,
+)
+
+# PRAGMAs that never return rows, and PRAGMAs that return no rows when they
+# are used to set a value, e.g. "PRAGMA user_version = 5"
+_PRAGMAS_WITHOUT_ROWS = {"case_sensitive_like", "incremental_vacuum", "shrink_memory"}
+_PRAGMAS_WITHOUT_ROWS_WHEN_SET = _PRAGMAS_WITHOUT_ROWS | {
+    "application_id",
+    "auto_vacuum",
+    "automatic_index",
+    "cache_size",
+    "cache_spill",
+    "cell_size_check",
+    "checkpoint_fullfsync",
+    "count_changes",
+    "default_cache_size",
+    "defer_foreign_keys",
+    "empty_result_callbacks",
+    "encoding",
+    "foreign_keys",
+    "full_column_names",
+    "fullfsync",
+    "ignore_check_constraints",
+    "legacy_alter_table",
+    "legacy_file_format",
+    "lock_proxy_file",
+    "page_size",
+    "query_only",
+    "read_uncommitted",
+    "recursive_triggers",
+    "reverse_unordered_selects",
+    "schema_version",
+    "short_column_names",
+    "synchronous",
+    "temp_store",
+    "temp_store_directory",
+    "trusted_schema",
+    "user_version",
+    "writable_schema",
+}
+
 
 class Database:
     """
@@ -654,31 +704,65 @@ class Database:
         The SQL is executed as soon as this method is called - the resulting rows
         are then fetched lazily as the returned iterable is iterated over.
 
+        A write that returns rows, such as ``INSERT ... RETURNING``, is committed
+        before this method returns, unless a transaction is already open, in
+        which case it becomes part of that transaction.
+
         :param sql: SQL query to execute
         :param params: Parameters to use in that query - an iterable for ``where id = ?``
           parameters, or a dictionary for ``where id = :id``
         :raises ValueError: if the SQL statement does not return rows - use
-          :meth:`execute` for those statements instead
+          :meth:`execute` for those statements instead. The statement has no
+          effect on the database in that case.
         """
+        params = params or tuple()
+        sql_start = _leading_whitespace_and_comments_re.sub("", sql, count=1)
+        pragma_match = _pragma_re.match(sql_start)
+        is_write = False
+        if pragma_match:
+            # Many PRAGMAs take effect while they are being compiled, so they
+            # cannot be inspected with EXPLAIN - reject the ones that are
+            # known not to return rows before running them
+            pragma_name = pragma_match.group("name").lower()
+            if pragma_name in _PRAGMAS_WITHOUT_ROWS or (
+                pragma_match.group("value")
+                and pragma_name in _PRAGMAS_WITHOUT_ROWS_WHEN_SET
+            ):
+                raise self._query_rejected()
+        elif not _explain_re.match(sql_start):
+            # Compile the statement with EXPLAIN, without running it, to find
+            # out whether it returns rows and whether it writes to the database
+            program = self.conn.execute("EXPLAIN " + sql, params).fetchall()
+            if not any(op[1] == "ResultRow" for op in program):
+                raise self._query_rejected()
+            is_write = any(op[1] == "Transaction" and op[3] for op in program)
         was_in_transaction = self.conn.in_transaction
-        cursor = self.execute(sql, params or tuple())
-        if cursor.description is None:
-            raise ValueError(
-                "query() can only be used with SQL that returns rows - "
-                "use execute() for other statements"
-            )
-        keys = [d[0] for d in cursor.description]
-
-        def rows() -> Generator[dict, None, None]:
-            for row in cursor:
-                yield dict(zip(keys, row))
+        try:
+            cursor = self.execute(sql, params)
+            if cursor.description is None:
+                # Only reachable for a PRAGMA sqlite-utils does not know about
+                raise self._query_rejected()
+            keys = [d[0] for d in cursor.description]
+            if was_in_transaction or not (is_write or self.conn.in_transaction):
+                results: Iterable[tuple] = cursor
+            else:
+                # A row-returning write such as INSERT ... RETURNING - fetch
+                # its rows so the statement completes, then commit it
+                results = cursor.fetchall()
+                if self.conn.in_transaction:
+                    self.conn.execute("COMMIT")
+        except BaseException:
             if not was_in_transaction and self.conn.in_transaction:
-                # A row-returning write such as INSERT ... RETURNING opened
-                # an implicit transaction - commit it now that its rows have
-                # been consumed
-                self.conn.execute("COMMIT")
+                self.conn.execute("ROLLBACK")
+            raise
+        return (dict(zip(keys, row)) for row in results)
 
-        return rows()
+    @staticmethod
+    def _query_rejected() -> ValueError:
+        return ValueError(
+            "query() can only be used with SQL that returns rows - "
+            "use execute() for other statements"
+        )
 
     def execute(
         self, sql: str, parameters: Optional[Union[Sequence, Dict[str, Any]]] = None
