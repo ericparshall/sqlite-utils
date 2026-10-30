@@ -333,6 +333,22 @@ _TRANSACTION_CONTROL_PREFIXES = (
     "RELEASE",
 )
 
+# Statements that db.query() refuses to run: they never return rows, and
+# cannot be undone by rolling back to a savepoint
+_QUERY_REJECTED_KEYWORDS = {
+    keyword.lower() for keyword in _TRANSACTION_CONTROL_PREFIXES
+} | {"vacuum", "attach", "detach"}
+
+# Leading whitespace and comments, followed by the first keyword
+_FIRST_KEYWORD_RE = re.compile(
+    r"(?:\s+|--[^\n]*(?:\n|$)|/\*.*?(?:\*/|$))*([a-z]*)", re.DOTALL | re.IGNORECASE
+)
+
+
+def _first_keyword(sql: str) -> str:
+    match = _FIRST_KEYWORD_RE.match(sql)
+    return match.group(1).lower() if match else ""
+
 
 class Database:
     """
@@ -658,27 +674,74 @@ class Database:
         :param params: Parameters to use in that query - an iterable for ``where id = ?``
           parameters, or a dictionary for ``where id = :id``
         :raises ValueError: if the SQL statement does not return rows - use
-          :meth:`execute` for those statements instead
+          :meth:`execute` for those statements instead. The statement is
+          rolled back, so it has no effect on the database.
         """
-        was_in_transaction = self.conn.in_transaction
-        cursor = self.execute(sql, params or tuple())
-        if cursor.description is None:
-            raise ValueError(
-                "query() can only be used with SQL that returns rows - "
-                "use execute() for other statements"
-            )
+        not_a_query = ValueError(
+            "query() can only be used with SQL that returns rows - "
+            "use execute() for other statements"
+        )
+        keyword = _first_keyword(sql)
+        if keyword in _QUERY_REJECTED_KEYWORDS:
+            raise not_a_query
+        params = params or tuple()
+        if (
+            keyword == "pragma"
+            and not self.conn.in_transaction
+            and self._pragma_returns_rows(sql, params)
+        ):
+            # Some PRAGMAs, such as journal_mode = wal, cannot run inside a
+            # transaction - so row-returning PRAGMAs run outside a savepoint
+            cursor = self.execute(sql, params)
+            if cursor.description is None:
+                raise not_a_query
+            rows: Iterable[tuple] = cursor
+        else:
+            # Run the statement inside a savepoint, so it can be undone if it
+            # turns out not to return rows
+            savepoint = "sqlite_utils_query_{}".format(secrets.token_hex(16))
+            self.conn.execute("SAVEPOINT {};".format(savepoint))
+            try:
+                if self._tracer:
+                    self._tracer(sql, params)
+                cursor = self.conn.execute(sql, params)
+                if cursor.description is None:
+                    raise not_a_query
+                rows = cursor
+                # Commits the statement, unless a transaction was already open
+                try:
+                    self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+                except sqlite3.OperationalError:
+                    # A row-returning write such as INSERT ... RETURNING
+                    # cannot be committed while it is still in progress, so
+                    # read all of its rows first
+                    rows = cursor.fetchall()
+                    self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+            except BaseException:
+                # An error such as ON CONFLICT ROLLBACK may have already
+                # rolled back the entire transaction, savepoint included
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK TO SAVEPOINT {};".format(savepoint))
+                    self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+                raise
         keys = [d[0] for d in cursor.description]
+        return (dict(zip(keys, row)) for row in rows)
 
-        def rows() -> Generator[dict, None, None]:
-            for row in cursor:
-                yield dict(zip(keys, row))
-            if not was_in_transaction and self.conn.in_transaction:
-                # A row-returning write such as INSERT ... RETURNING opened
-                # an implicit transaction - commit it now that its rows have
-                # been consumed
-                self.conn.execute("COMMIT")
-
-        return rows()
+    def _pragma_returns_rows(
+        self, sql: str, params: Union[Sequence, Dict[str, Any]]
+    ) -> bool:
+        # EXPLAIN compiles the PRAGMA without running it - a PRAGMA that
+        # returns rows compiles to a ResultRow instruction. Some PRAGMAs such
+        # as foreign_keys = on take effect while being compiled, unless a
+        # transaction is open, so compile it inside a savepoint
+        savepoint = "sqlite_utils_explain_{}".format(secrets.token_hex(16))
+        self.conn.execute("SAVEPOINT {};".format(savepoint))
+        try:
+            opcodes = [row[1] for row in self.conn.execute("EXPLAIN " + sql, params)]
+        finally:
+            self.conn.execute("ROLLBACK TO SAVEPOINT {};".format(savepoint))
+            self.conn.execute("RELEASE SAVEPOINT {};".format(savepoint))
+        return "ResultRow" in opcodes
 
     def execute(
         self, sql: str, parameters: Optional[Union[Sequence, Dict[str, Any]]] = None
