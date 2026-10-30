@@ -300,6 +300,17 @@ Available ``--fmt`` options are:
 
 This list can also be found by running ``sqlite-utils query --help``.
 
+Use ``--no-headers`` to omit the row of column names from ``--table`` or ``--fmt`` output, leaving just the data rows:
+
+.. code-block:: bash
+
+    sqlite-utils dogs.db "select name from dogs" --fmt plain --no-headers
+
+.. code-block:: output
+
+    Cleo
+    Pancakes
+
 .. _cli_query_raw:
 
 Returning raw data, such as binary content
