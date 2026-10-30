@@ -732,3 +732,16 @@ def test_enable_fts_cli_on_view_errors(tmpdir):
     result = CliRunner().invoke(cli_module.cli, ["enable-fts", db_path, "v", "text"])
     assert result.exit_code == 1
     assert result.output.strip() == "Error: Table v is actually a view"
+
+
+@pytest.mark.parametrize("fts_version", ("FTS4", "FTS5"))
+def test_search_duplicate_column_names(fresh_db, fts_version):
+    table = fresh_db["t"]
+    table.insert_all(search_records)
+    table.enable_fts(["text", "country"], fts_version=fts_version)
+    assert list(table.search("tanuki", columns=["text", "text"])) == [
+        {
+            "text": "tanuki are running tricksters",
+            "text_2": "tanuki are running tricksters",
+        }
+    ]

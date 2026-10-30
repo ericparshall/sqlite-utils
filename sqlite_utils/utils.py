@@ -613,6 +613,42 @@ def hash_record(record: Dict[str, Any], keys: Optional[Iterable[str]] = None) ->
     ).hexdigest()
 
 
+def dedupe_keys(keys: Iterable[str]) -> List[str]:
+    """
+    Rename duplicate names in ``keys`` so each one is unique, for example
+    when building dictionaries from query results with repeated column names.
+
+    The first occurrence of a name is kept as-is. Later duplicates get a
+    numeric suffix - ``_2``, ``_3`` and so on - skipping any suffixed name
+    that would collide with another name in ``keys``::
+
+        dedupe_keys(["id", "id", "id"])
+        # ["id", "id_2", "id_3"]
+        dedupe_keys(["id", "id", "id_2"])
+        # ["id", "id_3", "id_2"]
+
+    :param keys: Iterable of names, e.g. column names from ``cursor.description``
+    """
+    keys = list(keys)
+    original = set(keys)
+    if len(original) == len(keys):
+        return keys
+    used: Set[str] = set()
+    deduped = []
+    for key in keys:
+        if key in used:
+            suffix = 2
+            while (
+                "{}_{}".format(key, suffix) in original
+                or "{}_{}".format(key, suffix) in used
+            ):
+                suffix += 1
+            key = "{}_{}".format(key, suffix)
+        used.add(key)
+        deduped.append(key)
+    return deduped
+
+
 def _flatten(d: Dict[str, Any]) -> Generator[Tuple[str, Any], None, None]:
     for key, value in d.items():
         if isinstance(value, dict):
