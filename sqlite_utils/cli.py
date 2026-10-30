@@ -15,6 +15,7 @@ from sqlite_utils.db import (
     DescIndex,
     NoTable,
     NoView,
+    TransactionError,
     quote_identifier,
 )
 from sqlite_utils.plugins import ensure_plugins_loaded, pm, get_plugins
@@ -405,17 +406,28 @@ def analyze(path, names):
     type=click.Path(exists=True, file_okay=True, dir_okay=False, allow_dash=False),
     required=True,
 )
-def vacuum(path):
+@click.option(
+    "--into",
+    type=click.Path(file_okay=True, dir_okay=False, allow_dash=False),
+    help="Write a vacuumed copy to this file instead of vacuuming in place",
+)
+def vacuum(path, into):
     """Run VACUUM against the database
+
+    Use --into to write a vacuumed copy to a new file instead.
 
     Example:
 
     \b
         sqlite-utils vacuum chickens.db
+        sqlite-utils vacuum chickens.db --into chickens-backup.db
     """
     db = sqlite_utils.Database(path)
     _register_db_for_cleanup(db)
-    db.vacuum()
+    try:
+        db.vacuum(into=into)
+    except (FileExistsError, TransactionError) as e:
+        raise click.ClickException(str(e))
 
 
 @cli.command()
