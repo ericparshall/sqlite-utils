@@ -10,6 +10,7 @@ from sqlite_utils.db import (
     View,
     NoTable,
     NoView,
+    TransactionError,
 )
 from sqlite_utils.utils import hash_record, sqlite3
 import collections
@@ -979,6 +980,87 @@ def test_insert_hash_id_columns(fresh_db, use_table_factory):
 def test_vacuum(fresh_db):
     fresh_db["data"].insert({"foo": "foo", "bar": "bar"})
     fresh_db.vacuum()
+
+
+def _schema_and_rows(db):
+    return (
+        db.execute(
+            "select type, name, tbl_name, sql from sqlite_master order by name"
+        ).fetchall(),
+        {table: list(db[table].rows) for table in db.table_names()},
+    )
+
+
+@pytest.mark.parametrize("use_memory", (False, True))
+@pytest.mark.parametrize("use_pathlib", (False, True))
+@pytest.mark.parametrize("filename", ("backup.db", "it's a backup.db"))
+def test_vacuum_into(tmpdir, use_memory, use_pathlib, filename):
+    if use_memory:
+        db = Database(memory=True)
+    else:
+        db = Database(str(tmpdir / "source.db"))
+    db["dogs"].insert_all(
+        [{"id": 1, "name": "Cleo"}, {"id": 2, "name": "Pancakes"}], pk="id"
+    )
+    db["dogs"].create_index(["name"])
+    db.create_view("dog_names", "select name from dogs")
+    db.execute("create trigger dogs_ai after insert on dogs begin select 1; end")
+    db["dogs"].delete_where("id = ?", [2])
+    before = _schema_and_rows(db)
+    into = tmpdir / filename
+    db.vacuum(into=pathlib.Path(into) if use_pathlib else str(into))
+    # Source database is unchanged and still usable
+    assert _schema_and_rows(db) == before
+    db["dogs"].insert({"id": 3, "name": "Toby"})
+    # Copy has the same schema and rows
+    copy = Database(str(into))
+    assert _schema_and_rows(copy) == before
+    copy.close()
+
+
+@pytest.mark.parametrize("contents", (b"", b"existing"))
+def test_vacuum_into_existing_file(tmpdir, contents):
+    db = Database(memory=True)
+    db["dogs"].insert({"name": "Cleo"})
+    into = tmpdir / "backup.db"
+    into.write_binary(contents)
+    with pytest.raises(FileExistsError):
+        db.vacuum(into=str(into))
+    assert into.read_binary() == contents
+
+
+@pytest.mark.parametrize("use_atomic", (False, True))
+def test_vacuum_into_in_transaction(tmpdir, use_atomic):
+    db = Database(str(tmpdir / "source.db"))
+    db["dogs"].insert({"name": "Cleo"})
+    into = tmpdir / "backup.db"
+
+    def write_and_vacuum():
+        db["dogs"].insert({"name": "Pancakes"})
+        with pytest.raises(TransactionError):
+            db.vacuum(into=str(into))
+        assert db.conn.in_transaction
+        assert not into.exists()
+
+    if use_atomic:
+        with pytest.raises(ZeroDivisionError):
+            with db.atomic():
+                write_and_vacuum()
+                1 / 0
+    else:
+        db.begin()
+        write_and_vacuum()
+        db.rollback()
+    # The uncommitted insert was rolled back, not committed by vacuum()
+    assert [r["name"] for r in db["dogs"].rows] == ["Cleo"]
+
+
+def test_vacuum_into_tracer(tmpdir):
+    collected = []
+    db = Database(memory=True, tracer=lambda sql, params: collected.append(sql))
+    into = str(tmpdir / "backup.db")
+    db.vacuum(into=into)
+    assert any(sql.upper().startswith("VACUUM INTO") for sql in collected)
 
 
 def test_works_with_pathlib_path(tmpdir):
