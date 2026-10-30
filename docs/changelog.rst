@@ -22,6 +22,7 @@ Breaking changes:
 
 Everything else:
 
+- New ``db.vacuum(into=path)`` parameter and ``sqlite-utils vacuum --into path`` option, which use ``VACUUM INTO`` to write a vacuumed copy of the database to a new file while leaving the original unchanged. This works for in-memory databases too, providing a convenient way to snapshot or back up a database. See :ref:`python_api_vacuum` and :ref:`cli_vacuum`.
 - Fixed a bug where ``table.delete_where()``, ``table.optimize()`` and ``table.rebuild_fts()`` did not commit their changes, leaving the connection inside an open transaction. Their work - and any subsequent writes - could then be silently rolled back when the connection was closed. All three now use ``db.atomic()``, consistent with the other write methods.
 - The ``sqlite-utils drop-table`` command now refuses to drop a view, and ``drop-view`` refuses to drop a table. Previously each would silently drop the wrong type of object if the name matched. Both now exit with an error suggesting the correct command to use.
 - Migrations applied by the new :ref:`migrations system <migrations>` now run inside a transaction, together with the record of the migration having been applied. If a migration raises an exception its changes are rolled back and it stays pending, so it can be safely re-applied after the error is fixed. Migrations that cannot run inside a transaction, such as those executing ``VACUUM``, can opt out using ``@migrations(transactional=False)`` - see :ref:`migrations_transactions`.
