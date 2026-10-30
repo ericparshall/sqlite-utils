@@ -195,6 +195,111 @@ def test_output_table(db_path, options, expected):
     assert expected == result.output.strip()
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["-t"],
+        ["--fmt", "plain"],
+        ["--fmt", "simple"],
+        ["--fmt", "github"],
+        ["--fmt", "rst"],
+    ],
+)
+def test_output_table_no_headers(db_path, options):
+    db = Database(db_path)
+    with db.conn:
+        db["rows"].insert_all(
+            [
+                {
+                    "c1": "verb{}".format(i),
+                    "c2": "noun{}".format(i),
+                    "c3": "adjective{}".format(i),
+                }
+                for i in range(4)
+            ]
+        )
+    result = CliRunner().invoke(
+        cli.cli, ["rows", db_path, "rows"] + options + ["--no-headers"]
+    )
+    assert result.exit_code == 0
+    for header in ("c1", "c2", "c3"):
+        assert header not in result.output
+    for i in range(4):
+        for value in ("verb{}", "noun{}", "adjective{}"):
+            assert value.format(i) in result.output
+
+
+@pytest.mark.parametrize("options", [["-t"], ["--fmt", "plain"], ["--fmt", "github"]])
+def test_query_no_headers_with_table_output(db_path, options):
+    db = Database(db_path)
+    with db.conn:
+        db["dogs"].insert_all(
+            [
+                {"id": 1, "age": 4, "name": "Cleo"},
+                {"id": 2, "age": 2, "name": "Pancakes"},
+            ],
+            column_order=("id", "name", "age"),
+        )
+    result = CliRunner().invoke(
+        cli.cli,
+        [db_path, "select id, name, age from dogs"] + options + ["--no-headers"],
+    )
+    assert result.exit_code == 0
+    for header in ("id", "name", "age"):
+        assert header not in result.output
+    for value in ("1", "4", "Cleo", "2", "Pancakes"):
+        assert value in result.output
+
+
+@pytest.mark.parametrize(
+    "command,header,expected_values",
+    [("tables", "table", ["Gosh", "Gosh2"]), ("views", "view", ["hello"])],
+)
+def test_tables_and_views_no_headers(db_path, command, header, expected_values):
+    db = Database(db_path)
+    db.create_view("hello", "select 1 as one")
+    result = CliRunner().invoke(
+        cli.cli, [command, db_path, "--fmt", "plain", "--no-headers"]
+    )
+    assert result.exit_code == 0
+    assert header not in result.output
+    for value in expected_values:
+        assert value in result.output
+
+
+def test_triggers_no_headers(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    db = Database(db_path)
+    db["articles"].insert({"id": 1, "title": "Title the first"}, pk="id")
+    db.conn.execute(textwrap.dedent("""
+        CREATE TRIGGER blah AFTER INSERT ON articles
+        BEGIN
+            UPDATE articles SET title = title;
+        END
+    """))
+    result = CliRunner().invoke(
+        cli.cli, ["triggers", db_path, "--fmt", "plain", "--no-headers"]
+    )
+    assert result.exit_code == 0
+    assert result.output.startswith("blah")
+    assert not result.output.startswith("name")
+
+
+def test_indexes_no_headers(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    db = Database(db_path)
+    db.conn.executescript("""
+        create table Gosh (c1 text, c2 text, c3 text);
+        create index Gosh_idx on Gosh(c2, c3 desc);
+    """)
+    result = CliRunner().invoke(
+        cli.cli, ["indexes", db_path, "--fmt", "plain", "--no-headers"]
+    )
+    assert result.exit_code == 0
+    assert result.output.startswith("Gosh")
+    assert not result.output.startswith("table")
+
+
 def test_create_index(db_path):
     db = Database(db_path)
     assert [] == db["Gosh"].indexes

@@ -12,6 +12,19 @@ def test_memory_basic():
     assert result.output.strip() == '[{"1 + 1": 2}]'
 
 
+@pytest.mark.parametrize("options", [["-t"], ["--fmt", "plain"], ["--fmt", "github"]])
+def test_memory_no_headers_with_table_output(options):
+    result = CliRunner().invoke(
+        cli.cli,
+        ["memory", "select 1 + 1 as one, 2 + 2 as two"] + options + ["--no-headers"],
+    )
+    assert result.exit_code == 0
+    assert "one" not in result.output
+    assert "two" not in result.output
+    assert "2" in result.output
+    assert "4" in result.output
+
+
 @pytest.mark.parametrize("sql_from", ("test", "t", "t1"))
 @pytest.mark.parametrize("use_stdin", (True, False))
 def test_memory_csv(tmpdir, sql_from, use_stdin):
