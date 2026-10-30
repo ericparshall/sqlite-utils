@@ -600,6 +600,29 @@ def test_vacuum(db_path):
     assert result.exit_code == 0
 
 
+def test_vacuum_into(db_path, tmpdir):
+    db = Database(db_path)
+    db["Gosh"].insert({"c1": "a", "c2": "b", "c3": "c"})
+    into = str(tmpdir / "it's a backup.db")
+    result = CliRunner().invoke(cli.cli, ["vacuum", db_path, "--into", into])
+    assert result.exit_code == 0, result.output
+    copy = Database(into)
+    assert copy.table_names() == db.table_names()
+    assert list(copy["Gosh"].rows) == [{"c1": "a", "c2": "b", "c3": "c"}]
+    # Original is unchanged
+    assert db["Gosh"].count == 1
+
+
+def test_vacuum_into_existing_file_error(db_path, tmpdir):
+    into = tmpdir / "existing.db"
+    into.write_binary(b"")
+    result = CliRunner().invoke(cli.cli, ["vacuum", db_path, "--into", str(into)])
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+    assert "Traceback" not in result.output
+    assert into.read_binary() == b""
+
+
 def test_dump(db_path):
     result = CliRunner().invoke(cli.cli, ["dump", db_path])
     assert result.exit_code == 0

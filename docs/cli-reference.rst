@@ -1153,8 +1153,14 @@ See :ref:`cli_vacuum`.
 
           sqlite-utils vacuum chickens.db
 
+      Use --into to write a vacuumed copy to a new file, leaving the original
+      database unchanged:
+
+          sqlite-utils vacuum chickens.db --into chickens-backup.db
+
     Options:
-      -h, --help  Show this message and exit.
+      --into PATH  Write a vacuumed copy of the database to this new file instead
+      -h, --help   Show this message and exit.
 
 
 .. _cli_ref_dump:

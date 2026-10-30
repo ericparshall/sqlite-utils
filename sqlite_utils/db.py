@@ -963,9 +963,10 @@ class Database:
                 self.execute("PRAGMA journal_mode=delete;")
 
     def _ensure_no_open_transaction(self, operation: str) -> None:
-        # Changing journal mode assigns conn.isolation_level, which commits
-        # any open transaction as a side effect - breaking the rollback
-        # guarantee of atomic() and of user-managed transactions
+        # Operations that cannot run inside a transaction - changing journal
+        # mode assigns conn.isolation_level, which commits any open transaction
+        # as a side effect - would break the rollback guarantee of atomic()
+        # and of user-managed transactions
         if self.conn.in_transaction:
             raise TransactionError(
                 "{} cannot be used while a transaction is open".format(operation)
@@ -1484,9 +1485,26 @@ class Database:
                 if fk.column not in existing_indexes:
                     table.create_index([fk.column], find_unique_name=True)
 
-    def vacuum(self) -> None:
-        "Run a SQLite ``VACUUM`` against the database."
-        self.execute("VACUUM;")
+    def vacuum(self, into: Optional[Union[str, pathlib.Path]] = None) -> None:
+        """
+        Run a SQLite ``VACUUM`` against the database.
+
+        :param into: Path to a new file. If provided, ``VACUUM INTO`` writes a
+          vacuumed copy of the database to that file - including for in-memory
+          databases - and leaves the original database unchanged.
+        :raises FileExistsError: if the ``into`` file already exists
+        :raises TransactionError: if ``into`` is used while a transaction is open
+        """
+        if into is None:
+            self.execute("VACUUM;")
+            return
+        # VACUUM cannot run inside a transaction, and must not commit one
+        self._ensure_no_open_transaction("vacuum(into=...)")
+        # SQLite will happily write into an existing empty file - refuse
+        # to touch any existing file instead
+        if os.path.exists(into):
+            raise FileExistsError("File already exists: {}".format(into))
+        self.execute("VACUUM INTO ?", [str(into)])
 
     def analyze(self, name: Optional[str] = None) -> None:
         """
