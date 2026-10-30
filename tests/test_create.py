@@ -10,6 +10,7 @@ from sqlite_utils.db import (
     View,
     NoTable,
     NoView,
+    TransactionError,
 )
 from sqlite_utils.utils import hash_record, sqlite3
 import collections
@@ -979,6 +980,89 @@ def test_insert_hash_id_columns(fresh_db, use_table_factory):
 def test_vacuum(fresh_db):
     fresh_db["data"].insert({"foo": "foo", "bar": "bar"})
     fresh_db.vacuum()
+
+
+def _populate_for_vacuum(db):
+    db["dogs"].insert_all(
+        [{"id": 1, "name": "Cleo"}, {"id": 2, "name": "Pancakes"}], pk="id"
+    )
+    db["dogs"].create_index(["name"])
+    db.create_view("dog_names", "select name from dogs")
+    db.execute("create trigger dogs_ai after insert on dogs begin select 1; end")
+
+
+def _schema_and_rows(db):
+    return db.schema, list(db["dogs"].rows)
+
+
+@pytest.mark.parametrize("memory", (False, True))
+@pytest.mark.parametrize("use_pathlib", (False, True))
+@pytest.mark.parametrize("filename", ("backup.db", "it's a backup.db"))
+def test_vacuum_into(tmp_path, memory, use_pathlib, filename):
+    if memory:
+        db = Database(memory=True)
+    else:
+        db = Database(tmp_path / "source.db")
+    _populate_for_vacuum(db)
+    before = _schema_and_rows(db)
+    out = tmp_path / filename
+    traced = []
+    with db.tracer(lambda sql, params: traced.append((sql, params))):
+        result = db.vacuum(into=out if use_pathlib else str(out))
+    assert result is None
+    assert out.exists()
+    assert any("VACUUM" in sql and "INTO" in sql for sql, _ in traced)
+    copy = Database(out)
+    assert _schema_and_rows(copy) == before
+    assert {"table", "index", "view", "trigger"} <= {
+        row[0] for row in copy.execute("select type from sqlite_master").fetchall()
+    }
+    copy.close()
+    # Source is unchanged and still usable
+    assert _schema_and_rows(db) == before
+    db["dogs"].insert({"id": 3, "name": "Rex"})
+    assert db["dogs"].count == 3
+
+
+@pytest.mark.parametrize("content", (b"", b"not a database"))
+def test_vacuum_into_existing_file(fresh_db, tmp_path, content):
+    fresh_db["dogs"].insert({"name": "Cleo"})
+    out = tmp_path / "exists.db"
+    out.write_bytes(content)
+    traced = []
+    with fresh_db.tracer(lambda sql, params: traced.append(sql)):
+        with pytest.raises(FileExistsError):
+            fresh_db.vacuum(into=out)
+    assert traced == []
+    assert out.read_bytes() == content
+
+
+@pytest.mark.parametrize("use_atomic", (False, True))
+def test_vacuum_into_in_transaction(tmp_path, use_atomic):
+    db = Database(tmp_path / "source.db")
+    db["dogs"].insert({"id": 1, "name": "Cleo"}, pk="id")
+    out = tmp_path / "backup.db"
+
+    def attempt():
+        db["dogs"].insert({"id": 2, "name": "Pancakes"})
+        with pytest.raises(TransactionError):
+            db.vacuum(into=out)
+        assert db.conn.in_transaction
+        assert not out.exists()
+
+    if use_atomic:
+        with pytest.raises(ZeroDivisionError):
+            with db.atomic():
+                attempt()
+                1 / 0
+    else:
+        db.begin()
+        attempt()
+        # Uncommitted change still visible within the transaction
+        assert db["dogs"].count == 2
+        db.rollback()
+    # Change was never committed, and was rolled back with the transaction
+    assert db["dogs"].count == 1
 
 
 def test_works_with_pathlib_path(tmpdir):
