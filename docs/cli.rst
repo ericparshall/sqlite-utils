@@ -236,6 +236,19 @@ You can use the ``--table`` option (or ``-t`` shortcut) to output query results 
        1      4  Cleo
        2      2  Pancakes
 
+Use ``--no-headers`` to omit the row of column names from the table:
+
+.. code-block:: bash
+
+    sqlite-utils dogs.db "select * from dogs" --table --no-headers
+
+.. code-block:: output
+
+    -  -  --------
+    1  4  Cleo
+    2  2  Pancakes
+    -  -  --------
+
 You can use the ``--fmt`` option to specify different table formats, for example ``rst`` for reStructuredText:
 
 .. code-block:: bash
