@@ -83,6 +83,18 @@ def test_enable_fts_escape_table_names(fresh_db):
     assert [] == list(table.search("bar"))
 
 
+def test_search_dedupes_duplicate_column_names(fresh_db):
+    table = fresh_db["t"]
+    table.insert_all(search_records)
+    table.enable_fts(["text", "country"], fts_version="FTS4")
+    assert list(table.search("tanuki", columns=["text", "text"])) == [
+        {
+            "text": "tanuki are running tricksters",
+            "text_2": "tanuki are running tricksters",
+        }
+    ]
+
+
 def test_search_limit_offset(fresh_db):
     table = fresh_db["t"]
     table.insert_all(search_records)
