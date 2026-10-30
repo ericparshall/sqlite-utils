@@ -251,6 +251,17 @@ You can use the ``--fmt`` option to specify different table formats, for example
        2      2  Pancakes
     ====  =====  ========
 
+The ``--no-headers`` option can be used with ``--table`` or ``--fmt`` to omit the row of column names, outputting just the data rows:
+
+.. code-block:: bash
+
+    sqlite-utils dogs.db "select name from dogs" --fmt plain --no-headers
+
+.. code-block:: output
+
+    Cleo
+    Pancakes
+
 Available ``--fmt`` options are:
 
 .. [[[cog

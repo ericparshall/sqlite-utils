@@ -195,6 +195,73 @@ def test_output_table(db_path, options, expected):
     assert expected == result.output.strip()
 
 
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        (
+            ["--fmt", "simple"],
+            (
+                "-----  -----  ----------\n"
+                "verb0  noun0  adjective0\n"
+                "verb1  noun1  adjective1\n"
+                "-----  -----  ----------"
+            ),
+        ),
+        (
+            ["-t"],
+            (
+                "-----  -----  ----------\n"
+                "verb0  noun0  adjective0\n"
+                "verb1  noun1  adjective1\n"
+                "-----  -----  ----------"
+            ),
+        ),
+        (
+            ["--fmt", "plain"],
+            "verb0  noun0  adjective0\nverb1  noun1  adjective1",
+        ),
+        (
+            ["--fmt", "github"],
+            (
+                "|-------|-------|------------|\n"
+                "| verb0 | noun0 | adjective0 |\n"
+                "| verb1 | noun1 | adjective1 |"
+            ),
+        ),
+    ],
+)
+def test_output_table_no_headers(db_path, options, expected):
+    db = Database(db_path)
+    with db.conn:
+        db["rows"].insert_all(
+            [
+                {
+                    "c1": "verb{}".format(i),
+                    "c2": "noun{}".format(i),
+                    "c3": "adjective{}".format(i),
+                }
+                for i in range(2)
+            ]
+        )
+    result = CliRunner().invoke(
+        cli.cli, ["rows", db_path, "rows", "--no-headers"] + options
+    )
+    assert result.exit_code == 0
+    assert expected == result.output.strip()
+
+
+@pytest.mark.parametrize("options", (["-t"], ["--fmt", "plain"], ["--fmt", "grid"]))
+def test_tables_no_headers_table_format(db_path, options):
+    result = CliRunner().invoke(
+        cli.cli, ["tables", db_path, "--counts", "--no-headers"] + options
+    )
+    assert result.exit_code == 0
+    assert "Gosh" in result.output
+    assert "Gosh2" in result.output
+    assert "table" not in result.output
+    assert "count" not in result.output
+
+
 def test_create_index(db_path):
     db = Database(db_path)
     assert [] == db["Gosh"].indexes
@@ -693,6 +760,39 @@ def test_query_csv(db_path, format, expected):
     )
     expected_rest = "\n".join(expected.split("\n")[1:]).strip()
     assert result.output.strip().replace("\r", "") == expected_rest
+
+
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        (["-t"], "-  --------\n1  Cleo\n2  Pancakes\n-  --------"),
+        (["--fmt", "plain"], "1  Cleo\n2  Pancakes"),
+        (["--fmt", "tsv"], "1\tCleo\n2\tPancakes"),
+    ],
+)
+def test_query_table_no_headers(db_path, options, expected):
+    db = Database(db_path)
+    with db.conn:
+        db["dogs"].insert_all(
+            [
+                {"id": 1, "age": 4, "name": "Cleo"},
+                {"id": 2, "age": 2, "name": "Pancakes"},
+            ]
+        )
+    result = CliRunner().invoke(
+        cli.cli, [db_path, "select id, name from dogs", "--no-headers"] + options
+    )
+    assert result.exit_code == 0
+    assert result.output.strip() == expected
+
+
+def test_memory_table_no_headers():
+    result = CliRunner().invoke(
+        cli.cli,
+        ["memory", "select 'Cleo' as name", "--fmt", "plain", "--no-headers"],
+    )
+    assert result.exit_code == 0
+    assert result.output.strip() == "Cleo"
 
 
 _all_query = "select id, name, age from dogs"
