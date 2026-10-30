@@ -195,6 +195,78 @@ def test_output_table(db_path, options, expected):
     assert expected == result.output.strip()
 
 
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        (
+            ["--fmt", "plain"],
+            ("verb0  noun0  adjective0\n" "verb1  noun1  adjective1"),
+        ),
+        (
+            ["-t"],
+            (
+                "-----  -----  ----------\n"
+                "verb0  noun0  adjective0\n"
+                "verb1  noun1  adjective1\n"
+                "-----  -----  ----------"
+            ),
+        ),
+        (
+            ["--fmt", "github"],
+            (
+                "|-------|-------|------------|\n"
+                "| verb0 | noun0 | adjective0 |\n"
+                "| verb1 | noun1 | adjective1 |"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("command", ["rows", "query", "memory"])
+def test_output_table_no_headers(db_path, tmpdir, options, expected, command):
+    db = Database(db_path)
+    with db.conn:
+        db["rows"].insert_all(
+            [
+                {
+                    "c1": "verb{}".format(i),
+                    "c2": "noun{}".format(i),
+                    "c3": "adjective{}".format(i),
+                }
+                for i in range(2)
+            ]
+        )
+    if command == "rows":
+        args = ["rows", db_path, "rows"]
+    elif command == "query":
+        args = ["query", db_path, "select c1, c2, c3 from rows"]
+    else:
+        csv_path = str(tmpdir / "rows.csv")
+        with open(csv_path, "w") as fp:
+            fp.write("c1,c2,c3\nverb0,noun0,adjective0\nverb1,noun1,adjective1\n")
+        args = ["memory", csv_path, "select c1, c2, c3 from rows"]
+    result = CliRunner().invoke(cli.cli, args + options + ["--no-headers"])
+    assert result.exit_code == 0, result.output
+    assert expected == result.output.strip()
+    for header in ("c1", "c2", "c3"):
+        assert header not in result.output
+
+
+@pytest.mark.parametrize("options", [["-t"], ["--fmt", "plain"]])
+def test_tables_table_no_headers(db_path, options):
+    result = CliRunner().invoke(
+        cli.cli, ["tables", db_path, "--counts", "--no-headers"] + options
+    )
+    assert result.exit_code == 0, result.output
+    assert "Gosh" in result.output
+    assert "Gosh2" in result.output
+    assert "table" not in result.output
+    assert "count" not in result.output
+    # Without --no-headers the header row is still shown
+    result = CliRunner().invoke(cli.cli, ["tables", db_path, "--counts"] + options)
+    assert "table" in result.output
+    assert "count" in result.output
+
+
 def test_create_index(db_path):
     db = Database(db_path)
     assert [] == db["Gosh"].indexes
