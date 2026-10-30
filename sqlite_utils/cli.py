@@ -34,6 +34,7 @@ from .utils import (
     OperationalError,
     _compile_code,
     chunks,
+    dedupe_keys,
     file_progress,
     find_spatialite,
     flatten as _flatten,
@@ -3506,7 +3507,7 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
             # Any value that is a valid JSON string should be treated as JSON
             data = [maybe_json(value) for value in data]
         if not arrays:
-            data = dict(zip(headers, data))
+            data = dict(zip(dedupe_keys(headers), data))
         line = "{firstchar}{serialized}{maybecomma}{lastchar}".format(
             firstchar=("[" if first else " ") if not nl else "",
             serialized=json.dumps(data, default=json_binary),

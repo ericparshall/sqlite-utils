@@ -231,6 +231,15 @@ The ``db.query(sql)`` function executes a SQL query and returns an iterator over
 
 The SQL query is executed as soon as ``db.query()`` is called. The resulting rows are fetched lazily as you iterate, so large result sets are not loaded into memory all at once. Because execution is immediate, an error in your SQL will raise an exception straight away, and a statement such as ``INSERT ... RETURNING`` will take effect - and be committed, unless a transaction is open - even if you do not iterate over its results.
 
+Column names in the returned dictionaries are always unique, so no value is lost when a query returns duplicate names - as joins often do. The first occurrence of a name keeps it and later duplicates are given a numeric suffix of ``_2``, ``_3`` and so on. A suffix that would collide with another column name in the same result is skipped:
+
+.. code-block:: python
+
+    >>> list(db.query("select 1 as id, 2 as id, 3 as id_2"))
+    [{'id': 1, 'id_3': 2, 'id_2': 3}]
+
+This same renaming applies to :ref:`table.rows_where() <python_api_rows>` and :ref:`table.search() <python_api_fts_search>`, and to the JSON output of the ``sqlite-utils query`` command. CSV, TSV and table output keep the original duplicate headers. The underlying helper is available as :ref:`sqlite_utils.utils.dedupe_keys() <reference_utils_dedupe_keys>`.
+
 ``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, for example - will raise a ``ValueError``. The rejected statement is rolled back, so it has no effect on the database. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
 
 .. _python_api_execute:
