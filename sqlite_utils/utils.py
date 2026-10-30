@@ -582,6 +582,46 @@ def chunks(sequence: Iterable[T], size: int) -> Iterable[Iterable[T]]:
         yield itertools.chain([item], itertools.islice(iterator, size - 1))
 
 
+def dedupe_keys(keys: Iterable[str]) -> List[str]:
+    """
+    Rename duplicate names in a sequence of column names so that they can be
+    used as dictionary keys without any values being overwritten.
+
+    The first occurrence of a name is kept as-is. Later duplicates get a
+    numeric suffix: ``_2``, ``_3`` and so on. Suffixed names that would collide
+    with another name in the sequence are skipped::
+
+        dedupe_keys(["id", "id", "id"])
+        # ["id", "id_2", "id_3"]
+        dedupe_keys(["id", "id", "id_2"])
+        # ["id", "id_3", "id_2"]
+
+    :param keys: Iterable of column names
+    """
+    keys = list(keys)
+    if len(set(keys)) == len(keys):
+        return keys
+    used = set(keys)
+    seen: Set[str] = set()
+    suffixes: Dict[str, int] = {}
+    deduped = []
+    for key in keys:
+        if key not in seen:
+            seen.add(key)
+            deduped.append(key)
+            continue
+        suffix = suffixes.get(key, 1)
+        while True:
+            suffix += 1
+            candidate = "{}_{}".format(key, suffix)
+            if candidate not in used:
+                break
+        suffixes[key] = suffix
+        used.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
 def hash_record(record: Dict[str, Any], keys: Optional[Iterable[str]] = None) -> str:
     """
     ``record`` should be a Python dictionary. Returns a sha1 hash of the

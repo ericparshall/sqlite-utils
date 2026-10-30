@@ -233,6 +233,27 @@ The SQL query is executed as soon as ``db.query()`` is called. The resulting row
 
 ``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, for example - will raise a ``ValueError``. The rejected statement is rolled back, so it has no effect on the database. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
 
+.. _python_api_query_duplicate_columns:
+
+Duplicate column names
+~~~~~~~~~~~~~~~~~~~~~~
+
+Rows are returned as dictionaries, so a query that returns more than one column with the same name - common when joining tables - would otherwise lose values. To avoid this, the first column with a name keeps it and any later duplicates are given a numeric suffix of ``_2``, ``_3`` and so on:
+
+.. code-block:: python
+
+    db = Database(memory=True)
+    db.table("one").insert({"id": 1, "value": "left"})
+    db.table("two").insert({"id": 2, "value": "right"})
+    for row in db.query("select one.id, two.id, one.value, two.value from one, two"):
+        print(row)
+    # Outputs:
+    # {'id': 1, 'id_2': 2, 'value': 'left', 'value_2': 'right'}
+
+A suffix that would collide with another column name in the same result is skipped, so ``select 1 as id, 2 as id, 3 as id_2`` returns ``{'id': 1, 'id_3': 2, 'id_2': 3}``.
+
+The same renaming is applied to rows returned by :ref:`table.rows_where() <python_api_rows>` and :ref:`table.search() <python_api_fts_search>`. It is implemented by the :ref:`sqlite_utils.utils.dedupe_keys() <reference_utils_dedupe_keys>` function, which you can use with your own lists of column names.
+
 .. _python_api_execute:
 
 db.execute(sql, params)

@@ -11,6 +11,33 @@ def test_query(fresh_db):
     assert list(results) == [{"name": "Pancakes"}, {"name": "Cleo"}]
 
 
+def test_query_duplicate_column_names(fresh_db):
+    fresh_db["one"].insert({"id": 1, "value": "left"})
+    fresh_db["two"].insert({"id": 2, "value": "right"})
+    results = fresh_db.query(
+        "select one.id, two.id, one.value, two.value from one, two"
+    )
+    assert list(results) == [{"id": 1, "id_2": 2, "value": "left", "value_2": "right"}]
+
+
+def test_query_duplicate_column_names_skip_existing(fresh_db):
+    results = list(fresh_db.query("select 1 as id, 2 as id, 3 as id_2"))
+    assert results == [{"id": 1, "id_3": 2, "id_2": 3}]
+    assert list(results[0].keys()) == ["id", "id_3", "id_2"]
+
+
+@pytest.mark.skipif(
+    sqlite3.sqlite_version_info < (3, 35, 0),
+    reason="RETURNING requires SQLite 3.35.0 or higher",
+)
+def test_query_duplicate_column_names_returning(fresh_db):
+    fresh_db["t"].insert({"id": 1, "name": "Cleo"})
+    results = fresh_db.query(
+        "insert into t (id, name) values (2, 'Pancakes') returning id, id, name"
+    )
+    assert list(results) == [{"id": 2, "id_2": 2, "name": "Pancakes"}]
+
+
 def test_query_executes_eagerly(fresh_db):
     # The SQL runs when query() is called, not when the result is iterated,
     # so errors are raised at the call site
