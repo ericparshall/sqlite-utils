@@ -127,6 +127,21 @@ def test_search_where_args_disallows_query(fresh_db):
     )
 
 
+@pytest.mark.parametrize("fts_version", ("FTS4", "FTS5"))
+def test_search_duplicate_columns(fresh_db, fts_version):
+    table = fresh_db["t"]
+    table.insert_all(search_records)
+    table.enable_fts(["text", "country"], fts_version=fts_version)
+    results = list(table.search("tanuki", columns=["text", "text", "country"]))
+    assert results == [
+        {
+            "text": "tanuki are running tricksters",
+            "text_2": "tanuki are running tricksters",
+            "country": "Japan",
+        }
+    ]
+
+
 def test_search_include_rank(fresh_db):
     table = fresh_db["t"]
     table.insert_all(search_records)

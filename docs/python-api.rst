@@ -233,6 +233,26 @@ The SQL query is executed as soon as ``db.query()`` is called. The resulting row
 
 ``db.query()`` can only be used with SQL that returns rows. Passing a statement that returns no rows - an ``INSERT`` or ``UPDATE`` without a ``RETURNING`` clause, for example - will raise a ``ValueError``. The rejected statement is rolled back, so it has no effect on the database. Use :ref:`db.execute() <python_api_execute>` for those statements instead.
 
+.. _python_api_query_duplicate_columns:
+
+Duplicate column names
+~~~~~~~~~~~~~~~~~~~~~~
+
+If a query returns more than one column with the same name - which is common when joining tables - the later columns are renamed with a numeric suffix so that no values are lost. The first column keeps its name, the second becomes ``name_2``, the third ``name_3`` and so on:
+
+.. code-block:: python
+
+    db = Database(memory=True)
+    db["one"].insert({"id": 1, "value": "left"})
+    db["two"].insert({"id": 2, "value": "right"})
+    print(list(db.query("select one.id, two.id, one.value, two.value from one, two")))
+    # Outputs:
+    # [{'id': 1, 'id_2': 2, 'value': 'left', 'value_2': 'right'}]
+
+A suffixed name that would clash with another column in the same result is skipped, so ``select 1 as id, 2 as id, 3 as id_2`` returns ``{'id': 1, 'id_3': 2, 'id_2': 3}``. Use ``as`` aliases in your SQL if you want to control the names yourself.
+
+The same renaming applies to :ref:`table.rows_where() <python_api_rows>` and :ref:`table.search() <python_api_fts_search>`. It is implemented by the :ref:`sqlite_utils.utils.dedupe_keys() <reference_utils_dedupe_keys>` function.
+
 .. _python_api_execute:
 
 db.execute(sql, params)
@@ -502,6 +522,8 @@ To return custom columns (instead of the default that uses ``select *``) pass ``
     >>> for row in db.table("dogs").rows_where(select='name, age'):
     ...     print(row)
     {'name': 'Cleo', 'age': 4}
+
+If the selected columns include duplicate names the later ones are renamed with a numeric suffix, so ``select='id, id, name'`` returns dictionaries with ``id``, ``id_2`` and ``name`` keys - see :ref:`python_api_query_duplicate_columns`.
 
 To specify an order, use the ``order_by=`` argument::
 
@@ -2610,7 +2632,7 @@ The ``.search()`` method also accepts the following optional parameters:
     The column to sort by. Defaults to relevance score. Can optionally include a ``desc``, e.g. ``rowid desc``.
 
 ``columns`` array of strings
-    Columns to return. Defaults to all columns.
+    Columns to return. Defaults to all columns. Duplicate names are renamed with a numeric suffix, as described in :ref:`python_api_query_duplicate_columns`.
 
 ``limit`` integer
     Number of results to return. Defaults to all results.

@@ -83,3 +83,31 @@ def test_maximize_csv_field_size_limit():
 )
 def test_flatten(input, expected):
     assert utils.flatten(input) == expected
+
+
+@pytest.mark.parametrize(
+    "input,expected",
+    (
+        ([], []),
+        (["id"], ["id"]),
+        (["id", "name"], ["id", "name"]),
+        (["id", "id"], ["id", "id_2"]),
+        (["id", "id", "id"], ["id", "id_2", "id_3"]),
+        (["id", "name", "id", "name"], ["id", "name", "id_2", "name_2"]),
+        # A suffixed name that collides with another column is skipped
+        (["id", "id", "id_2"], ["id", "id_3", "id_2"]),
+        (["id_2", "id", "id"], ["id_2", "id", "id_3"]),
+        (["id", "id", "id_2", "id_2"], ["id", "id_3", "id_2", "id_2_2"]),
+        (["id", "id", "id", "id_2"], ["id", "id_3", "id_4", "id_2"]),
+    ),
+)
+def test_dedupe_keys(input, expected):
+    assert utils.dedupe_keys(input) == expected
+    # Should accept any iterable, not just lists
+    assert utils.dedupe_keys(iter(input)) == expected
+    assert utils.dedupe_keys(tuple(input)) == expected
+
+
+def test_dedupe_keys_returns_list():
+    assert utils.dedupe_keys(("id", "name")) == ["id", "name"]
+    assert isinstance(utils.dedupe_keys(("id", "name")), list)

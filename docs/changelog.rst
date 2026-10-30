@@ -28,6 +28,10 @@ Other foreign key improvements:
 - Foreign keys declared as ``REFERENCES other_table`` with no explicit column are now resolved to the other table's primary key by ``table.foreign_keys``, instead of reporting ``other_column=None``.
 - Fixed a ``TypeError`` when sorting ``ForeignKey`` objects where some were compound.
 
+Everything else:
+
+- Queries that return more than one column with the same name - common when joining tables - no longer silently lose values. Rows are returned as dictionaries, so previously the later column overwrote the earlier one: ``db.query("select one.id, two.id from one, two")`` returned only ``two.id``. Duplicate names are now given a numeric suffix, so the result is ``{"id": 1, "id_2": 2}``, with a suffix that would clash with another column being skipped. This applies to ``db.query()``, ``table.rows_where()``, ``table.search()`` and the JSON output of the ``sqlite-utils query`` command - CSV, TSV and table output keep the original headers. See :ref:`python_api_query_duplicate_columns`. The renaming is available as a new :ref:`sqlite_utils.utils.dedupe_keys() <reference_utils_dedupe_keys>` function.
+
 .. _v4_0rc2:
 
 4.0rc2 (2026-07-04)

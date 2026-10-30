@@ -582,6 +582,47 @@ def chunks(sequence: Iterable[T], size: int) -> Iterable[Iterable[T]]:
         yield itertools.chain([item], itertools.islice(iterator, size - 1))
 
 
+def dedupe_keys(keys: Iterable[str]) -> List[str]:
+    """
+    Return a list of the provided ``keys`` with any duplicates renamed so that
+    every key is unique. The first occurrence of a name is left unchanged -
+    subsequent occurrences have a numeric suffix added, starting with ``_2``.
+
+    A suffixed name that would collide with another name in the same list is
+    skipped, so ``["id", "id", "id_2"]`` becomes ``["id", "id_3", "id_2"]``.
+
+    This is used to build dictionaries from query results where more than one
+    column has the same name, which is common when joining tables, without
+    losing any of the values.
+
+    Example usage::
+
+        from sqlite_utils.utils import dedupe_keys
+
+        dedupe_keys(["id", "name", "id", "id"])
+        # ['id', 'name', 'id_2', 'id_3']
+
+    :param keys: Any iterable of key names
+    """
+    keys = list(keys)
+    names = set(keys)
+    if len(names) == len(keys):
+        return keys
+    used: Set[str] = set()
+    deduped = []
+    for key in keys:
+        if key in used:
+            suffix = 2
+            while "{}_{}".format(key, suffix) in used or (
+                "{}_{}".format(key, suffix) in names
+            ):
+                suffix += 1
+            key = "{}_{}".format(key, suffix)
+        used.add(key)
+        deduped.append(key)
+    return deduped
+
+
 def hash_record(record: Dict[str, Any], keys: Optional[Iterable[str]] = None) -> str:
     """
     ``record`` should be a Python dictionary. Returns a sha1 hash of the
