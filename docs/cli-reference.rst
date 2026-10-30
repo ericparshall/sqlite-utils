@@ -1154,7 +1154,8 @@ See :ref:`cli_vacuum`.
           sqlite-utils vacuum chickens.db
 
     Options:
-      -h, --help  Show this message and exit.
+      --into FILE  Write a compacted copy to this file instead of vacuuming in place
+      -h, --help   Show this message and exit.
 
 
 .. _cli_ref_dump:

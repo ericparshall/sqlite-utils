@@ -405,7 +405,13 @@ def analyze(path, names):
     type=click.Path(exists=True, file_okay=True, dir_okay=False, allow_dash=False),
     required=True,
 )
-def vacuum(path):
+@click.option(
+    "--into",
+    type=click.Path(file_okay=True, dir_okay=False, allow_dash=False),
+    default=None,
+    help="Write a compacted copy to this file instead of vacuuming in place",
+)
+def vacuum(path, into):
     """Run VACUUM against the database
 
     Example:
@@ -415,7 +421,10 @@ def vacuum(path):
     """
     db = sqlite_utils.Database(path)
     _register_db_for_cleanup(db)
-    db.vacuum()
+    try:
+        db.vacuum(into=into)
+    except FileExistsError as e:
+        raise click.ClickException(str(e))
 
 
 @cli.command()
