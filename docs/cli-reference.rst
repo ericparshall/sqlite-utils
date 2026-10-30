@@ -1149,12 +1149,16 @@ See :ref:`cli_vacuum`.
 
       Run VACUUM against the database
 
+      Use --into to write a vacuumed copy to a new file instead.
+
       Example:
 
           sqlite-utils vacuum chickens.db
+          sqlite-utils vacuum chickens.db --into chickens-backup.db
 
     Options:
-      -h, --help  Show this message and exit.
+      --into FILE  Write a vacuumed copy to this file instead of vacuuming in place
+      -h, --help   Show this message and exit.
 
 
 .. _cli_ref_dump:
