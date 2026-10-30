@@ -405,17 +405,32 @@ def analyze(path, names):
     type=click.Path(exists=True, file_okay=True, dir_okay=False, allow_dash=False),
     required=True,
 )
-def vacuum(path):
+@click.option(
+    "--into",
+    type=click.Path(file_okay=True, dir_okay=False, allow_dash=False),
+    metavar="PATH",
+    help="Write a vacuumed copy of the database to this new file",
+)
+def vacuum(path, into):
     """Run VACUUM against the database
 
     Example:
 
     \b
         sqlite-utils vacuum chickens.db
+
+    Use --into to write a compacted copy to a new file, leaving the
+    original unchanged:
+
+    \b
+        sqlite-utils vacuum chickens.db --into backup.db
     """
     db = sqlite_utils.Database(path)
     _register_db_for_cleanup(db)
-    db.vacuum()
+    try:
+        db.vacuum(into=into)
+    except FileExistsError as e:
+        raise click.ClickException(str(e))
 
 
 @cli.command()

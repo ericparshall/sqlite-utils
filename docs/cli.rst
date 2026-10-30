@@ -2696,6 +2696,14 @@ You can run VACUUM to optimize your database like so:
 
     sqlite-utils vacuum mydb.db
 
+Use ``--into`` to write a vacuumed, compacted copy of the database to a new file instead, leaving the original unchanged. This uses SQLite's `VACUUM INTO <https://www.sqlite.org/lang_vacuum.html#vacuum_with_an_into_clause>`__ and is a convenient way to create a backup:
+
+.. code-block:: bash
+
+    sqlite-utils vacuum mydb.db --into backup.db
+
+The command will fail with an error if the destination file already exists.
+
 .. _cli_optimize:
 
 Optimize
